@@ -19,7 +19,7 @@ export default function PushCampaignManager() {
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<any>(null);
 
-  const SERVER_IP = '127.0.0.1';
+  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
   const getToken = () => {
     const s = JSON.parse(localStorage.getItem('kemtchop_session') || '{}');
     return s.access_token || s.token || '';
@@ -34,7 +34,7 @@ export default function PushCampaignManager() {
     const token = getToken();
     
     try {
-      const response = await fetch(`http://${SERVER_IP}:8000/admin/notifications/send`, {
+      const response = await fetch(`${API_BASE}/admin/notifications/send`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
