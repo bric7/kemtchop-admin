@@ -10,6 +10,16 @@ const Login = ({ onLogin }) => {
 
   const SERVER_IP = "127.0.0.1";
 
+  // ✅ Helper pour normaliser les permissions : chaîne CSV → tableau
+  const normalizePermissions = (perms: string | string[] | null | undefined): string[] => {
+    if (!perms) return [];
+    if (Array.isArray(perms)) return perms;
+    if (typeof perms === 'string') {
+      return perms.split(',').map((p: string) => p.trim()).filter((p: string) => p.length > 0);
+    }
+    return [];
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -25,12 +35,45 @@ const Login = ({ onLogin }) => {
       const data = await response.json();
 
       if (response.ok) {
-        // data doit contenir { token, role, username }
+        // ✅ Le backend retourne 'access_token' ou 'token'
+        const jwtToken = data.access_token || data.token;
+        
+        if (jwtToken) {
+          // ✅ Sauvegarder le token
+          localStorage.setItem('token', jwtToken);
+          
+          // ✅ Normaliser les permissions (CSV → tableau)
+          const permissions = normalizePermissions(data.permissions);
+          
+          // ✅ Sauvegarder les permissions DANS LES DEUX ENDROITS (compatibilité)
+          // 1. Dans kemtchop_session (format backend)
+          const sessionData = {
+            ...data,
+            permissions: permissions  // ← Toujours un tableau ici
+          };
+          localStorage.setItem('kemtchop_session', JSON.stringify(sessionData));
+          
+          // 2. Dans user_permissions (accès facile pour le frontend)
+          localStorage.setItem('user_permissions', JSON.stringify(permissions));
+          
+          // ✅ Sauvegarder les infos utilisateur
+          localStorage.setItem('admin_username', data.username || username);
+          localStorage.setItem('admin_role', data.role || 'admin');
+          
+          console.log('✅ [Login] Token sauvegardé:', jwtToken.substring(0, 30) + '...');
+          console.log('✅ [Login] Permissions normalisées:', permissions);
+        } else {
+          console.error('❌ [Login] Aucun token trouvé dans la réponse:', data);
+          setError('Token manquant dans la réponse du serveur');
+        }
+        
+        // ✅ Puis appeler le callback parent
         onLogin(data); 
       } else {
         setError(data.detail || "Identifiants incorrects");
       }
     } catch (err) {
+      console.error('❌ Erreur login:', err);
       setError("Impossible de contacter le serveur de sécurité");
     } finally {
       setLoading(false);

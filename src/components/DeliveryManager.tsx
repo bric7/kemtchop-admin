@@ -30,22 +30,50 @@ export default function DeliveryManager() {
     }
   };
 
-  // 3. Fonction pour sauvegarder toute la config dans la base de données
-  const handleSave = async () => {
-    setLoading(true);
+    
+    // 🔍 Récupérer le token admin depuis le storage
+    // Adapte la clé selon ton code : 'admin_token', 'token', 'auth_token', etc.
+    const handleSave = async () => {
+  setLoading(true);
+  
+  const adminToken = localStorage.getItem('token');  // ← Même clé que Login
+  console.log('🔍 [DeliveryManager] Token trouvé:', adminToken ? 'OUI (length=' + adminToken.length + ')' : 'NON');
+  
+  if (!adminToken) {
+    console.error('❌ [DeliveryManager] Token manquant → alerte session expirée');
+    alert('⚠️ Session admin expirée. Reconnecte-toi pour sauvegarder.');
+    setLoading(false);
+    return;
+    }
+
     try {
       const response = await fetch('http://localhost:8000/admin/settings/update-zones', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminToken}` // ✅ C'EST ÇA QUI MANQUAIT !
+        },
         body: JSON.stringify({ zones, price: basePrice }),
       });
 
+      if (response.status === 401) {
+        console.error('❌ Token invalide ou expiré');
+        alert('Session expirée. Reconnecte-toi à l\'admin.');
+        // Optionnel : vider le token et rediriger
+        localStorage.removeItem('admin_token');
+        localStorage.removeItem('token');
+        return;
+      }
+
       if (response.ok) {
         alert("✅ Configuration enregistrée ! L'app mobile est à jour.");
+        console.log('🔄 Zones mises à jour : invalider le cache client');
       } else {
-        alert("❌ Erreur lors de l'enregistrement.");
+        const errorData = await response.json().catch(() => ({}));
+        alert(`❌ Erreur serveur : ${errorData.detail || response.status}`);
       }
-    } catch (err) {
+    } catch (err: any) {
+      console.error("❌ Erreur réseau:", err);
       alert("❌ Impossible de contacter le serveur backend.");
     } finally {
       setLoading(false);

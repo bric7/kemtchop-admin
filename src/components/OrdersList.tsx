@@ -1,14 +1,68 @@
 import React, { useEffect, useState } from "react";
 
 const OrdersList = () => {
-  const [orders, setOrders] = useState([]);
+  const [orders, setOrders] = useState<any[]>([]);
   const SERVER_IP = "127.0.0.1"; 
+
+  // ✅ Helper inline pour vérifier les permissions
+  const hasPermission = (required: string): boolean => {
+    // 1. Essayer user_permissions (format tableau JSON)
+    const userPermsRaw = localStorage.getItem('user_permissions');
+    if (userPermsRaw) {
+      try {
+        const perms = JSON.parse(userPermsRaw);
+        if (Array.isArray(perms) && perms.includes(required)) return true;
+      } catch (e) {
+        console.error('❌ Erreur parse user_permissions:', e);
+      }
+    }
+    
+    // 2. Fallback : lire depuis kemtchop_session
+    const sessionRaw = localStorage.getItem('kemtchop_session');
+    if (sessionRaw) {
+      try {
+        const session = JSON.parse(sessionRaw);
+        let perms = session.permissions;
+        
+        if (typeof perms === 'string') {
+          // Convertir "dashboard,orders" → ["dashboard", "orders"]
+          return perms.split(',').map((p: string) => p.trim()).includes(required);
+        }
+        if (Array.isArray(perms)) {
+          return perms.includes(required);
+        }
+      } catch (e) {
+        console.error('❌ Erreur parse kemtchop_session:', e);
+      }
+    }
+    
+    return false;
+  };
+
+  // ✅ Vérification des permissions AU DÉBUT du composant
+  if (!hasPermission('orders')) {
+    return (
+      <div className="p-8 text-center animate-in fade-in duration-300">
+        <div className="text-6xl mb-4">🔒</div>
+        <h2 className="text-xl font-black text-gray-900 uppercase italic mb-2">
+          Accès refusé
+        </h2>
+        <p className="text-gray-500 font-bold">
+          Vous n'avez pas la permission <span className="text-red-600">"orders"</span> pour gérer les commandes.
+        </p>
+        <p className="text-gray-400 text-sm mt-4">
+          Contactez l'administrateur pour obtenir cet accès.
+        </p>
+      </div>
+    );
+  }
 
   // --- FONCTION POUR RÉCUPÉRER LE TOKEN ---
   const getAuthToken = () => {
     const session = localStorage.getItem('kemtchop_session');
     if (!session) return null;
-    return JSON.parse(session).access_token;
+    const parsed = JSON.parse(session);
+    return parsed.access_token || parsed.token;
   };
 
   const fetchOrders = async () => {
@@ -18,7 +72,7 @@ const OrdersList = () => {
     try {
       const response = await fetch(`http://${SERVER_IP}:8000/admin/orders`, {
         headers: {
-          'Authorization': `Bearer ${token}` // On envoie le badge
+          'Authorization': `Bearer ${token}`
         }
       });
       
@@ -31,11 +85,11 @@ const OrdersList = () => {
     }
   };
 
-  const handleNextStatus = async (orderId, currentStatus) => {
+  const handleNextStatus = async (orderId: number, currentStatus: string) => {
     const token = getAuthToken();
     if (!token) return;
 
-    const statusFlow = {
+    const statusFlow: Record<string, string> = {
       "en_attente": "cuisine",
       "cuisine": "livraison",
       "en_cuisine": "livraison",
@@ -51,7 +105,7 @@ const OrdersList = () => {
         { 
           method: "PATCH",
           headers: {
-            'Authorization': `Bearer ${token}` // On envoie aussi le badge ici
+            'Authorization': `Bearer ${token}`
           }
         }
       );
@@ -69,18 +123,17 @@ const OrdersList = () => {
   useEffect(() => {
     fetchOrders();
     const interval = setInterval(() => {
-      // On ne rafraîchit que si on a un token (évite les 401 en boucle si déconnecté)
       if (getAuthToken()) fetchOrders();
     }, 5000); 
     return () => clearInterval(interval);
   }, []);
 
-  const renderColumn = (title, statusList, bgColor) => {
-    const filteredOrders = orders.filter((order) => 
+  const renderColumn = (title: string, statusList: string[], bgColor: string) => {
+    const filteredOrders = orders.filter((order: any) => 
         statusList.includes(order.status)
     );
 
-    const sortedOrders = [...filteredOrders].sort((a, b) => Number(b.id) - Number(a.id));
+    const sortedOrders = [...filteredOrders].sort((a: any, b: any) => Number(b.id) - Number(a.id));
 
     return (
       <div className="flex-1 min-w-[320px] bg-gray-50 rounded-[2.5rem] p-6 shadow-inner border border-gray-100">
@@ -94,14 +147,14 @@ const OrdersList = () => {
         </div>
 
         <div className="space-y-4">
-          {sortedOrders.map((order) => (
+          {sortedOrders.map((order: any) => (
             <div key={order.id} className="bg-white p-5 rounded-[2rem] shadow-sm border border-gray-50 hover:shadow-xl hover:scale-[1.02] transition-all duration-300">
               
               <div className="flex justify-between items-start mb-3">
                 <p className="text-[10px] font-mono text-gray-300">#{order.id}</p>
                 <div className="text-right">
                     <span className="text-sm font-black text-gray-900 block">
-                        {order.total_amount.toLocaleString()} F
+                        {order.total_amount?.toLocaleString() || 0} F
                     </span>
                     {order.affiliate_code && (
                         <div className="mt-1 flex flex-col items-end">

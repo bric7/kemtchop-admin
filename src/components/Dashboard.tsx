@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { DollarSign, ShoppingBag, Utensils, TrendingUp, Users } from 'lucide-react';
+import { DollarSign, ShoppingBag, Utensils, TrendingUp, Users, AlertCircle } from 'lucide-react';
 
 const Dashboard = () => {
   const [data, setData] = useState({ 
@@ -10,57 +10,140 @@ const Dashboard = () => {
     commissions: 0 
   });
   
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  
   const SERVER_IP = "127.0.0.1";
 
+  // ✅ Helper robuste pour extraire le token (gère les deux formats)
+  const getAuthToken = (): string | null => {
+    try {
+      const sessionRaw = localStorage.getItem('kemtchop_session');
+      if (!sessionRaw) return null;
+      
+      const session = JSON.parse(sessionRaw);
+      // ✅ Essayer access_token d'abord, puis token (fallback)
+      return session.access_token || session.token || null;
+    } catch (e) {
+      console.error('❌ Erreur parse session:', e);
+      return null;
+    }
+  };
+
   useEffect(() => {
-    // 1. On récupère le token depuis le localStorage
-    const session = localStorage.getItem('kemtchop_session');
-    if (!session) return;
-
-    const { access_token } = JSON.parse(session);
-
-    // 2. Requête Fetch avec la bonne structure
-    fetch(`http://${SERVER_IP}:8000/admin/stats`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${access_token}`, // Le fameux JWT
-        'Content-Type': 'application/json'
+    const fetchStats = async () => {
+      setLoading(true);
+      setError(null);
+      
+      const token = getAuthToken();
+      
+      if (!token) {
+        console.error('❌ Token manquant ou invalide');
+        setError("Session invalide. Veuillez vous reconnecter.");
+        setLoading(false);
+        // Optionnel: rediriger vers login après un délai
+        // setTimeout(() => window.location.href = '/login', 2000);
+        return;
       }
-    })
-      .then(res => {
-        if (!res.ok) throw new Error("Session expirée ou non autorisée");
-        return res.json();
-      })
-      .then(json => setData(json))
-      .catch(err => console.error("Erreur stats:", err));
-  }, []);
+      
+      try {
+        const response = await fetch(`http://${SERVER_IP}:8000/admin/stats`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,  // ✅ Token garanti non-undefined
+            'Content-Type': 'application/json'
+          },
+        });
+
+        // ✅ Gestion détaillée des erreurs HTTP
+        if (response.status === 401) {
+          throw new Error("Token expiré ou invalide");
+        }
+        if (response.status === 403) {
+          throw new Error("Accès refusé : permissions insuffisantes");
+        }
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.detail || `Erreur ${response.status}`);
+        }
+
+        const json = await response.json();
+        setData(json);
+        
+      } catch (err: any) {
+        console.error("❌ Erreur fetch stats:", err.message || err);
+        setError(err.message || "Impossible de charger les statistiques");
+        
+        // ✅ Si 401/403, proposer une reconnexion
+        if (err.message?.includes('expiré') || err.message?.includes('refusé')) {
+          setError("Session expirée. [Se reconnecter](/login)");
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStats();
+  }, []);  // Exécuté une fois au montage
+
+  // ✅ UI d'erreur avec action de reconnexion
+  if (error) {
+    return (
+      <div className="p-8 flex flex-col items-center justify-center min-h-[400px]">
+        <AlertCircle className="text-red-500 mb-4" size={48} />
+        <h3 className="text-lg font-bold text-gray-900 mb-2">Erreur de chargement</h3>
+        <p className="text-gray-500 mb-6">{error}</p>
+        <button
+          onClick={() => {
+            localStorage.clear();
+            window.location.href = '/login';
+          }}
+          className="px-6 py-2 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition"
+        >
+          Se reconnecter
+        </button>
+      </div>
+    );
+  }
+
+  // ✅ UI de chargement
+  if (loading) {
+    return (
+      <div className="p-8 flex items-center justify-center min-h-[400px]">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-red-200 border-t-red-600 rounded-full animate-spin" />
+          <p className="text-gray-500 font-medium">Chargement des statistiques...</p>
+        </div>
+      </div>
+    );
+  }
 
   const cards = [
     { 
       title: "Chiffre d'Affaires", 
-      value: `${data.revenue?.toLocaleString()} F`, 
-      icon: <DollarSign />, 
+      value: `${data.revenue?.toLocaleString() || 0} F`, 
+      icon: <DollarSign size={20} />, 
       color: "bg-green-500", 
       shadow: "shadow-green-100" 
     },
     { 
       title: "Commissions à Payer", 
-      value: `${data.commissions?.toLocaleString()} F`, 
-      icon: <Users />, 
+      value: `${data.commissions?.toLocaleString() || 0} F`, 
+      icon: <Users size={20} />, 
       color: "bg-blue-600", 
       shadow: "shadow-blue-100" 
     },
     { 
       title: "Commandes Totales", 
-      value: data.orders, 
-      icon: <ShoppingBag />, 
+      value: data.orders ?? 0, 
+      icon: <ShoppingBag size={20} />, 
       color: "bg-red-500", 
       shadow: "shadow-red-100" 
     },
     { 
       title: "Meilleure Vente", 
-      value: data.top_product, 
-      icon: <TrendingUp />, 
+      value: data.top_product || "N/A", 
+      icon: <TrendingUp size={20} />, 
       color: "bg-black", 
       shadow: "shadow-gray-200" 
     },

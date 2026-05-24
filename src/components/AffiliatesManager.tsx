@@ -1,139 +1,160 @@
-import React, { useState } from 'react';
-import { Search, UserCheck, Copy, Phone, ShieldAlert } from 'lucide-react';
+// src/components/AffiliatesManager.tsx
+import React, { useState, useEffect } from "react";
+import { Search, Users, MessageCircle, Copy, Check } from "lucide-react";
 
-const AffiliatesManager = () => {
-  const [phone, setPhone] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [userData, setUserData] = useState(null);
-  
-  const SERVER_URL = "http://127.0.0.1:8000"; 
-  const session = JSON.parse(localStorage.getItem('kemtchop_session') || '{}');
+export default function AffiliatesManager() {
+  const [affiliates, setAffiliates] = useState<any[]>([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
 
-  const handleSearchAndActivate = async () => {
-    if (!phone) return alert("Entrez un numéro !");
-    
-    setLoading(true);
-    setUserData(null);
+  const SERVER_IP = "127.0.0.1";
+  const BASE_URL = `http://${SERVER_IP}:8000`;
 
+  const getSession = () => JSON.parse(localStorage.getItem('kemtchop_session') || 'null');
+
+  // ✅ Charger uniquement les affiliés (is_affiliate = true)
+  const fetchAffiliates = async () => {
+    const session = getSession();
+    if (!session) return;
     try {
-      // Cette route doit pointer vers la gestion des CLIENTS/AFFILIÉS
-      const response = await fetch(`${SERVER_URL}/admin/activate-affiliate/?phone=${phone}`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
+      const response = await fetch(`${BASE_URL}/admin/users`, {
+        headers: { 'Authorization': `Bearer ${session.access_token || session.token}` }
       });
-      
+      if (!response.ok) throw new Error(`Erreur: ${response.status}`);
       const data = await response.json();
-      
-      if (response.ok) {
-        setUserData(data);
-        setPhone(""); 
-      } else {
-        alert(data.detail || "Client non trouvé dans la base Android");
-      }
-    } catch (error) {
-      alert("Erreur de connexion au serveur");
-    } finally {
-      setLoading(false);
-    }
+      // ✅ Filtrer : ne garder que les affiliés
+      const affs = (Array.isArray(data) ? data : []).filter((u: any) => u.is_affiliate);
+      setAffiliates(affs);
+    } catch (e) { console.error("Erreur chargement affiliés:", e); }
+    finally { setLoading(false); }
   };
 
-  const copyToClipboard = (text) => {
-    navigator.clipboard.writeText(text);
-    alert("Lien copié pour l'ambassadeur !");
+  useEffect(() => { fetchAffiliates(); }, []);
+
+  // ✅ Générer le lien de parrainage
+  const getReferralLink = (affiliateCode: string) => {
+    return `${BASE_URL}/home?ref=${affiliateCode}`;
   };
+
+  // ✅ Copier le lien dans le presse-papier
+  const copyReferralLink = async (code: string, id: number) => {
+    const link = getReferralLink(code);
+    await navigator.clipboard.writeText(link);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  // ✅ Ouvrir WhatsApp avec message de campagne
+  const sendWhatsAppCampaign = (phone: string, name: string, affiliateCode: string) => {
+    const message = `Bonjour ${name} 👋\n\nVotre code affilié KemTchop : *${affiliateCode}*\nPartagez ce lien et gagnez 15% sur chaque commande :\n${getReferralLink(affiliateCode)}\n\nMerci de faire partie de l'aventure ! 🇨🇲🍲`;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
+  };
+
+  // ✅ Envoyer un message groupé à plusieurs affiliés (pour campagnes)
+  const sendBulkWhatsApp = () => {
+    const selected = affiliates.filter((a: any) => a.phone);
+    if (selected.length === 0) { alert("Aucun affilié avec numéro de téléphone"); return; }
+    
+    const campaignText = `🚀 Nouvelle campagne KemTchop !\nPartagez votre lien affilié cette semaine et doublez vos gains.\nVotre code : [CODE]\nLien : [LIEN]\n\nBonne chance ! 🎉`;
+    
+    // Ouvrir WhatsApp Web avec le message pré-rempli (l'utilisateur devra copier-coller pour chaque destinataire)
+    const encoded = encodeURIComponent(campaignText);
+    window.open(`https://web.whatsapp.com/send?text=${encoded}`, '_blank');
+    
+    alert(`📋 Message prêt pour ${selected.length} affiliés !\n\nCopiez-collez le message dans WhatsApp Web pour chaque destinataire.\n\n💡 Astuce : Utilisez WhatsApp Business pour envoyer des messages groupés automatiquement.`);
+  };
+
+  const filtered = affiliates.filter((a: any) =>
+    a.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
+    a.phone?.includes(search) ||
+    a.affiliate_code?.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
-    <div className="max-w-2xl mx-auto p-8">
-      <div className="mb-8">
-        <h2 className="text-2xl font-black uppercase italic">Gestion des Clients & Affiliés</h2>
-        <p className="text-gray-500 text-sm">Recherchez un utilisateur Android pour l'activer ou l'aider.</p>
+    <div className="space-y-6">
+      {/* Header avec action groupée */}
+      <div className="flex justify-between items-center">
+        <div className="relative w-80">
+          <Search className="absolute left-4 top-4 text-gray-400" size={20} />
+          <input
+            type="text"
+            placeholder="Rechercher un affilié..."
+            className="w-full pl-12 pr-4 py-3 bg-white rounded-xl border outline-none focus:ring-2 focus:ring-red-100"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <button
+          onClick={sendBulkWhatsApp}
+          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-xl font-bold text-sm hover:bg-green-700 transition"
+        >
+          <MessageCircle size={18} />
+          Campagne WhatsApp ({filtered.length})
+        </button>
       </div>
 
-      {/* ZONE DE RECHERCHE */}
-      <div className="bg-gray-50 p-6 rounded-[2rem] border-2 border-dashed border-gray-200 mb-8">
-        <label className="text-[10px] font-black uppercase text-gray-400 ml-2">Numéro de téléphone Client</label>
-        <div className="flex gap-3 mt-2">
-          <div className="relative flex-1">
-            <Phone className="absolute left-4 top-4 text-gray-400" size={20} />
-            <input 
-              type="text" 
-              placeholder="6XXXXXXXX" 
-              className="w-full pl-12 pr-4 py-4 bg-white rounded-2xl border-none shadow-sm font-bold text-lg"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-            />
-          </div>
-          <button 
-            onClick={handleSearchAndActivate}
-            disabled={loading}
-            className="bg-black text-white px-8 rounded-2xl font-black uppercase italic hover:bg-red-600 transition-colors disabled:bg-gray-300"
-          >
-            {loading ? "Recherche..." : "Gérer"}
-          </button>
-        </div>
+      {/* Liste des affiliés */}
+      <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+        {loading ? (
+          <div className="p-20 text-center text-gray-400">Chargement des affiliés...</div>
+        ) : (
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-gray-50">
+                <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase">Affilié</th>
+                <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase">Code</th>
+                <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase">Commission</th>
+                <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {filtered.map((aff: any) => {
+                const commission = (aff.pending_commissions || 0).toLocaleString();
+                return (
+                  <tr key={aff.id} className="hover:bg-green-50/30">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-green-100 text-green-600 flex items-center justify-center font-black">
+                          {aff.customer_name?.substring(0,2).toUpperCase() || '?'}
+                        </div>
+                        <div>
+                          <p className="font-bold text-sm">{aff.customer_name}</p>
+                          <p className="text-[10px] text-gray-400">{aff.phone}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        <code className="text-xs bg-gray-100 px-2 py-1 rounded">{aff.affiliate_code}</code>
+                        <button onClick={() => copyReferralLink(aff.affiliate_code, aff.id)} className="p-1 hover:bg-gray-100 rounded" title="Copier le lien">
+                          {copiedId === aff.id ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}
+                        </button>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="text-sm font-bold text-green-600">{commission} FCFA</span>
+                      <p className="text-[10px] text-gray-400">en attente</p>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <button
+                        onClick={() => sendWhatsAppCampaign(aff.phone, aff.customer_name, aff.affiliate_code)}
+                        className="px-3 py-1.5 text-[10px] font-black uppercase bg-green-600 text-white rounded hover:bg-green-700 transition flex items-center gap-1 ml-auto"
+                      >
+                        <MessageCircle size={12} />
+                        Message
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {filtered.length === 0 && (
+                <tr><td colSpan={4} className="p-8 text-center text-gray-400">Aucun affilié trouvé</td></tr>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
-
-      {/* RÉSULTAT DU COMPTE CLIENT */}
-      {userData && (
-        <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-2xl overflow-hidden">
-          <div className="bg-green-500 p-6 text-white flex justify-between items-center">
-            <div className="flex items-center gap-3">
-              <UserCheck size={28} />
-              <h3 className="font-black uppercase italic">Compte Client Trouvé</h3>
-            </div>
-            <span className="bg-white text-green-600 px-4 py-1 rounded-full font-black text-xs">
-              {userData.affiliate_code || "CLIENT STANDARD"}
-            </span>
-          </div>
-
-          <div className="p-8 space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-gray-50 p-4 rounded-2xl">
-                <p className="text-[10px] font-bold text-gray-400 uppercase">Nom du client</p>
-                <p className="font-black text-gray-800">{userData.user_name || "Non renseigné"}</p>
-              </div>
-              <div className="bg-gray-50 p-4 rounded-2xl">
-                <p className="text-[10px] font-bold text-gray-400 uppercase">Téléphone</p>
-                <p className="font-black text-gray-800">{userData.phone || "N/A"}</p>
-              </div>
-            </div>
-
-            {/* SECTION MOT DE PASSE OUBLIÉ / INFOS */}
-            <div className="bg-yellow-50 border border-yellow-100 p-4 rounded-2xl flex items-start gap-3">
-              <ShieldAlert className="text-yellow-600 shrink-0" size={20} />
-              <div>
-                <p className="text-xs font-bold text-yellow-800 uppercase text-[10px]">Aide Connexion</p>
-                <p className="text-xs text-yellow-700 mt-1">
-                  Si le client a oublié son mot de passe, confirmez son identité avec le nom ci-dessus.
-                </p>
-              </div>
-            </div>
-
-            {/* LIEN D'AFFILIATION SI ACTIVÉ */}
-            {userData.share_link && (
-              <div className="mt-6 pt-6 border-t border-gray-100">
-                <p className="text-[10px] font-black text-gray-400 uppercase mb-3 text-center">Lien d'ambassadeur généré</p>
-                <div className="flex items-center gap-2 bg-gray-900 p-2 rounded-2xl overflow-hidden">
-                  <code className="flex-1 text-green-400 text-[11px] font-mono px-4 truncate">
-                    {userData.share_link}
-                  </code>
-                  <button 
-                    onClick={() => copyToClipboard(userData.share_link)}
-                    className="bg-white text-black p-3 rounded-xl hover:bg-green-500 hover:text-white transition-all"
-                  >
-                    <Copy size={18} />
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
-};
-
-export default AffiliatesManager;
+}

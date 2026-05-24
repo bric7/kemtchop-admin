@@ -11,7 +11,9 @@ import {
   BookOpen,
   Truck,
   Users,
-  ShieldCheck
+  ShieldCheck,
+  Settings,
+  Package
 } from 'lucide-react';
 
 // Importation de tous tes composants
@@ -25,6 +27,9 @@ import AffiliatesManager from "../components/AffiliatesManager";
 import FinanceManager from '../components/FinanceManager';
 import UsersManager from "../components/UsersManager";
 import TeamManager from "../components/TeamManager";
+import CustomersManager from '../components/CustomersManager';
+import CampaignManager from '../components/CampaignManager';
+import { MessageCircle } from 'lucide-react'; // Si pas déjà importé
 
 const AdminPanel = () => {
   // 1. GESTION DE LA SESSION
@@ -36,32 +41,88 @@ const AdminPanel = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  // 2. CONFIGURATION DE TOUS LES MENUS (Avec Rôles)
+  // 2. CONFIGURATION DE TOUS LES MENUS (IDs uniques)
   const menuItems = [
-    { id: 'dashboard', label: 'Stats', icon: <LayoutDashboard size={20} />, roles: ['admin'] },
-    { id: 'products', label: 'Nouveau Plat', icon: <PlusCircle size={20} />, roles: ['admin'] },
-    { id: 'manage_menu', label: 'Menu', icon: <BookOpen size={20} />, roles: ['admin'] },
-    { id: 'orders', label: 'Commandes', icon: <ShoppingCart size={20} />, roles: ['admin', 'manager', 'livreur'] },
-    { id: 'delivery', label: 'Zones Livr.', icon: <Truck size={20} />, roles: ['admin'] },
-    { id: 'affiliates', label: 'Affiliés', icon: <Users size={20} />, roles: ['admin'] },
-    { id: 'finance', label: 'Commissions', icon: <CreditCard size={20} />, roles: ['admin'] },
-    { id: 'users', label: 'Comptes', icon: <ShieldCheck size={20} />, roles: ['admin'] },
-    { id: 'team', label: 'Gestion Équipe', icon: <UserIcon size={20} />, roles: ['admin'] },
+    { id: 'dashboard', label: 'Stats', icon: <LayoutDashboard size={20} /> },
+    { id: 'products', label: 'Nouveau Plat', icon: <PlusCircle size={20} /> },
+    { id: 'manage_menu', label: 'Catalogue', icon: <BookOpen size={20} /> },
+    { id: 'orders', label: 'Commandes', icon: <ShoppingCart size={20} /> },
+    { id: 'delivery', label: 'Zones Livr.', icon: <Truck size={20} /> },
+    { id: 'affiliates', label: 'Affiliés', icon: <Users size={20} /> },
+    { id: 'finance', label: 'Commissions', icon: <CreditCard size={20} /> },
+    { id: 'users', label: 'Comptes', icon: <ShieldCheck size={20} /> },
+    { id: 'campaigns', label: 'Campagnes WA', icon: <MessageCircle size={20} /> },
+    { id: 'team', label: 'Équipe', icon: <UserIcon size={20} /> },          // 👥 Managers (accès admin)
+    { id: 'affiliates_view', label: 'Ambassadeurs', icon: <Users size={20} /> }, // 🤝 Affiliés
+    { id: 'customers_view', label: 'Clients', icon: <Users size={20} /> },  // 👤 Clients simples
+    { id: 'inventory', label: 'Stocks', icon: <Package size={20} /> },
+    { id: 'settings', label: 'Paramètres', icon: <Settings size={20} /> },
+    { id: 'wallet', label: 'Portefeuille', icon: <CreditCard size={20} /> },
   ];
+
+  // ✅ MAPPING : Noms des permissions → IDs des menus correspondants
+  const PERMISSION_TO_MENU_MAP: Record<string, string[]> = {
+    'view_stats': ['dashboard'],
+    'edit_orders': ['orders'],
+    'users': ['users', 'team', 'customers_view'],  // manage_users donne accès à Équipe + Clients
+    'manage_products': ['products', 'manage_menu'],
+    'manage_delivery': ['delivery'],
+    'manage_affiliates': ['affiliates', 'affiliates_view'],
+    'manage_finance': ['finance', 'wallet'],
+    'manage_inventory': ['inventory'],
+    'manage_settings': ['settings'],
+    'manage_users': ['users', 'team', 'customers_view', 'campaigns'],
+    // Fallback : permissions avec même nom que menu ID
+    'dashboard': ['dashboard'],
+    'orders': ['orders'],
+    'products': ['products'],
+    'team': ['team'],
+    'settings': ['settings'],
+    'wallet': ['wallet'],
+    'inventory': ['inventory'],
+    'delivery': ['delivery'],
+    'affiliates': ['affiliates'],
+    'finance': ['finance'],
+    'manage_menu': ['manage_menu'],
+    'affiliates_view': ['affiliates_view'],
+    'customers_view': ['customers_view'],
+  };
+
+  // ✅ Helper pour vérifier si un menu doit être affiché
+  const canAccessMenuItem = (itemId: string): boolean => {
+    // ✅ L'admin et super_admin voient tout
+    const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+    if (isAdmin) return true;
+    
+    // Pour les autres, vérifier les permissions
+    const permissions = user?.permissions || [];
+    const permsArray = Array.isArray(permissions) 
+      ? permissions 
+      : (typeof permissions === 'string' ? permissions.split(',').map((p: string) => p.trim()) : []);
+    
+    // Check 1: Permission directe (même nom que menu ID)
+    if (permsArray.includes(itemId)) return true;
+    
+    // Check 2: Permission mappée vers ce menu ID
+    for (const perm of permsArray) {
+      const mappedIds = PERMISSION_TO_MENU_MAP[perm] || [];
+      if (mappedIds.includes(itemId)) return true;
+    }
+    
+    return false;
+  };
 
   // 3. LOGIQUE DE REDIRECTION AUTOMATIQUE
   useEffect(() => {
     if (user) {
-      const currentItem = menuItems.find(item => item.id === activeTab);
-      // Si l'onglet actuel n'est pas permis pour ce rôle, on redirige
-      if (!currentItem || !currentItem.roles.includes(user.role)) {
-        const firstAllowed = menuItems.find(item => item.roles.includes(user.role));
+      if (!canAccessMenuItem(activeTab)) {
+        const firstAllowed = menuItems.find(item => canAccessMenuItem(item.id));
         if (firstAllowed) setActiveTab(firstAllowed.id);
       }
     }
   }, [user, activeTab]);
 
-  const handleLogin = (userData) => {
+  const handleLogin = (userData: any) => {
     setUser(userData);
     localStorage.setItem('kemtchop_session', JSON.stringify(userData));
   };
@@ -69,6 +130,8 @@ const AdminPanel = () => {
   const handleLogout = () => {
     setUser(null);
     localStorage.removeItem('kemtchop_session');
+    localStorage.removeItem('user_permissions');
+    localStorage.removeItem('token');
     setActiveTab('dashboard');
   };
 
@@ -90,10 +153,10 @@ const AdminPanel = () => {
 
         <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
           {menuItems
-            .filter(item => item.roles.includes(user.role))
+            .filter(item => canAccessMenuItem(item.id))
             .map((item) => (
               <button
-                key={item.id}
+                key={item.id}  // ✅ IDs uniques garantis
                 onClick={() => setActiveTab(item.id)}
                 className={`w-full flex items-center gap-4 px-4 py-3 rounded-xl transition-all ${
                   activeTab === item.id 
@@ -139,24 +202,49 @@ const AdminPanel = () => {
         </header>
 
         <div className="p-8">
-          {/* AFFICHAGE CONDITIONNEL COMPLET */}
-          {activeTab === 'dashboard' && user.role === 'admin' && <Dashboard />}
-          {activeTab === 'products' && user.role === 'admin' && <AddProduct />}
-          {activeTab === 'manage_menu' && user.role === 'admin' && <ProductManager />}
-          {activeTab === 'orders' && <OrdersList />}
-          {activeTab === 'delivery' && user.role === 'admin' && <DeliveryManager />}
-          {activeTab === 'affiliates' && user.role === 'admin' && <AffiliatesManager />}
-          {activeTab === 'finance' && user.role === 'admin' && <FinanceManager />}
-          {activeTab === 'users' && user.role === 'admin' && <UsersManager />}
-          {activeTab === 'team' && <TeamManager />}
+          {/* AFFICHAGE CONDITIONNEL PAR PERMISSIONS - SANS DOUBLONS */}
+          {activeTab === 'dashboard' && canAccessMenuItem('dashboard') && <Dashboard />}
+          {activeTab === 'products' && canAccessMenuItem('products') && <AddProduct />}
+          {activeTab === 'manage_menu' && canAccessMenuItem('manage_menu') && <ProductManager />}
+          {activeTab === 'orders' && canAccessMenuItem('orders') && <OrdersList />}
+          {activeTab === 'delivery' && canAccessMenuItem('delivery') && <DeliveryManager />}
+          {activeTab === 'affiliates' && canAccessMenuItem('affiliates') && <AffiliatesManager />}
+          {activeTab === 'finance' && canAccessMenuItem('finance') && <FinanceManager />}
+          {activeTab === 'users' && canAccessMenuItem('users') && <UsersManager />}
+          {activeTab === 'campaigns' && canAccessMenuItem('campaigns') && <CampaignManager />}
+          
+          {/* ✅ NOUVEAUX ONGLETS - Un seul rendu chacun */}
+          {activeTab === 'team' && canAccessMenuItem('team') && <TeamManager />}
+          {activeTab === 'affiliates_view' && canAccessMenuItem('affiliates_view') && <AffiliatesManager />}
+          {activeTab === 'customers_view' && canAccessMenuItem('customers_view') && <CustomersManager />}
+          
+          {/* Placeholders pour les onglets en développement */}
+          {activeTab === 'inventory' && canAccessMenuItem('inventory') && (
+            <div className="text-center py-20">
+              <Package className="mx-auto text-gray-300 mb-4" size={48} />
+              <p className="text-gray-500 font-bold">Gestion des stocks — En développement</p>
+            </div>
+          )}
+          {activeTab === 'settings' && canAccessMenuItem('settings') && (
+            <div className="text-center py-20">
+              <Settings className="mx-auto text-gray-300 mb-4" size={48} />
+              <p className="text-gray-500 font-bold">Paramètres — En développement</p>
+            </div>
+          )}
+          {activeTab === 'wallet' && canAccessMenuItem('wallet') && (
+            <div className="text-center py-20">
+              <CreditCard className="mx-auto text-gray-300 mb-4" size={48} />
+              <p className="text-gray-500 font-bold">Portefeuille — En développement</p>
+            </div>
+          )}
 
-          {/* SÉCURITÉ : Message si un non-admin essaie de forcer un onglet */}
-          {(!['admin'].includes(user.role) && !['orders'].includes(activeTab)) && (
-  <div className="h-64 flex flex-col items-center justify-center bg-white rounded-[2rem] border border-gray-100 shadow-sm">
-     <ShieldCheck className="text-gray-200 mb-4" size={48} />
-     <p className="text-gray-400 font-black uppercase text-sm">Accès Réservé à Brice</p>
-  </div>
-)}
+          {/* SÉCURITÉ : Message si accès refusé */}
+          {!canAccessMenuItem(activeTab) && (
+            <div className="h-64 flex flex-col items-center justify-center bg-white rounded-[2rem] border border-gray-100 shadow-sm">
+              <ShieldCheck className="text-gray-200 mb-4" size={48} />
+              <p className="text-gray-400 font-black uppercase text-sm">Accès refusé : Permission "{activeTab}" requise</p>
+            </div>
+          )}
         </div>
       </main>
     </div>

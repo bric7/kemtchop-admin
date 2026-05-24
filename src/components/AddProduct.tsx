@@ -88,7 +88,7 @@ export default function AddProduct() {
     formData.append('family_size', familySize);
     formData.append('image', imageFile);
     if (videoFile) formData.append('video', videoFile);
-    formData.append('complements', JSON.stringify(complements));
+    formData.append('complements', complements.join(','));
 
     try {
       const response = await fetch('http://localhost:8000/admin/upload-content', {
