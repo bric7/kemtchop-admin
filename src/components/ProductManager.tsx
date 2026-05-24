@@ -1,32 +1,42 @@
 import React, { useEffect, useState } from "react";
 import { Edit3, Trash2, X, Save, Loader2, Image as ImageIcon, Video } from "lucide-react";
 
+// ✅ Interface déplacée EN DEHORS du composant
+interface Product {
+  id: string;
+  product_name: string;
+  price: number;
+  image_url?: string;
+  video_url?: string;
+  complements?: string;
+  title?: string;
+  family_size?: number;
+  [key: string]: any;
+}
+
 const ProductManager = () => {
-  const [products, setProducts] = useState([]);
-  const [editingProduct, setEditingProduct] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [soloPrice, setSoloPrice] = useState<number>(0);
+  const [familyCount, setFamilyCount] = useState<number>(3);
   
-  // Utilise "localhost" si tu es sur PC, ou l'IP locale si tu testes sur mobile
   const SERVER_IP = "127.0.0.1"; 
 
-  // Fonction utilitaire pour nettoyer et corriger les URLs d'images/vidéos
-  const getCorrectUrl = (url) => {
+  // ✅ Fonction typée
+  const getCorrectUrl = (url: string | undefined): string => {
     if (!url) return "https://via.placeholder.com/400x300?text=Pas+de+média";
-    
-    // Si l'URL contient déjà le dossier /videos/, on extrait le nom du fichier
-    // Cela évite les problèmes d'IP enregistrées en dur dans la BDD
     if (url.includes("/videos/")) {
       const fileName = url.split("/videos/").pop();
       return `http://${SERVER_IP}:8000/videos/${fileName}`;
     }
-    
     return url.startsWith('http') ? url : `http://${SERVER_IP}:8000${url}`;
   };
 
   const fetchProducts = async () => {
     try {
       const res = await fetch(`http://${SERVER_IP}:8000/admin/products`);
-      const data = await res.json();
+      const data: Product[] = await res.json();
       setProducts(data);
     } catch (error) {
       console.error("Erreur lors de la récupération :", error);
@@ -37,11 +47,8 @@ const ProductManager = () => {
     fetchProducts();
   }, []);
 
-  // États pour la logique de calcul dynamique
-  const [soloPrice, setSoloPrice] = useState(0);
-  const [familyCount, setFamilyCount] = useState(3);
-
-  const handleDelete = async (id, name) => {
+  // ✅ Paramètres typés
+  const handleDelete = async (id: string, name: string) => {
     if (window.confirm(`Voulez-vous vraiment supprimer "${name}" ?`)) {
       try {
         const res = await fetch(`http://${SERVER_IP}:8000/admin/products/${id}`, { method: 'DELETE' });
@@ -55,10 +62,13 @@ const ProductManager = () => {
     }
   };
 
-  const handleUpdate = async (e) => {
+  // ✅ Event typé + null check pour editingProduct
+  const handleUpdate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!editingProduct) return; // ✅ Protection null
+    
     setLoading(true);
-    const formData = new FormData(e.target);
+    const formData = new FormData(e.currentTarget); // ✅ currentTarget pour FormEvent
     
     formData.append("price_duo", (soloPrice * 2).toString());
     formData.append("price_family", (soloPrice * familyCount - 500).toString());
@@ -89,9 +99,10 @@ const ProductManager = () => {
                 src={getCorrectUrl(p.image_url)} 
                 alt={p.product_name} 
                 className="w-full h-full object-cover" 
-                onError={(e) => { 
-                    e.target.onerror = null; 
-                    e.target.src = "https://via.placeholder.com/400x300?text=Erreur+Image"; 
+                // ✅ onError avec type React + currentTarget
+                onError={(e: React.SyntheticEvent<HTMLImageElement, Event>) => { 
+                  e.currentTarget.onerror = null; 
+                  e.currentTarget.src = "https://via.placeholder.com/400x300?text=Erreur+Image"; 
                 }}
               />
               
@@ -124,7 +135,6 @@ const ProductManager = () => {
         ))}
       </div>
 
-      {/* MODALE DE MODIFICATION */}
       {editingProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md overflow-y-auto">
           <div className="bg-white w-full max-w-2xl rounded-[3rem] p-10 shadow-2xl my-auto">
@@ -138,15 +148,15 @@ const ProductManager = () => {
                 <div className="space-y-4">
                   <div>
                     <label className="text-[10px] font-black uppercase text-gray-400 ml-2 italic">Titre/Accroche</label>
-                    <input name="title" defaultValue={editingProduct.title} className="w-full p-4 bg-gray-50 rounded-2xl font-bold outline-none ring-red-500 focus:ring-2 border-none" />
+                    <input name="title" defaultValue={editingProduct.title || ''} className="w-full p-4 bg-gray-50 rounded-2xl font-bold outline-none ring-red-500 focus:ring-2 border-none" />
                   </div>
                   <div>
                     <label className="text-[10px] font-black uppercase text-gray-400 ml-2 italic">Nom du Plat</label>
-                    <input name="product_name" defaultValue={editingProduct.product_name} className="w-full p-4 bg-gray-50 rounded-2xl font-bold outline-none ring-red-500 focus:ring-2 border-none" />
+                    <input name="product_name" defaultValue={editingProduct.product_name || ''} className="w-full p-4 bg-gray-50 rounded-2xl font-bold outline-none ring-red-500 focus:ring-2 border-none" />
                   </div>
                   <div>
                     <label className="text-[10px] font-black uppercase text-gray-400 ml-2 italic">Compléments</label>
-                    <input name="complements" defaultValue={editingProduct.complements} className="w-full p-4 bg-gray-50 rounded-2xl font-bold outline-none ring-red-500 focus:ring-2 border-none" placeholder="Frites, Plantain, Jus..." />
+                    <input name="complements" defaultValue={editingProduct.complements || ''} className="w-full p-4 bg-gray-50 rounded-2xl font-bold outline-none ring-red-500 focus:ring-2 border-none" placeholder="Frites, Plantain, Jus..." />
                   </div>
                 </div>
 
@@ -155,7 +165,7 @@ const ProductManager = () => {
                     <label className="text-[10px] font-black uppercase text-gray-500 italic">Prix Solo (Base)</label>
                     <input 
                       name="price" type="number" value={soloPrice}
-                      onChange={(e) => setSoloPrice(Number(e.target.value))}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSoloPrice(Number(e.target.value))}
                       className="w-full p-4 bg-white/5 rounded-2xl font-black text-xl text-red-500 outline-none" 
                     />
                   </div>
@@ -163,7 +173,7 @@ const ProductManager = () => {
                     <label className="text-[10px] font-black uppercase text-gray-500 italic">Nb Pers. Famille</label>
                     <input 
                       name="family_size" type="number" value={familyCount}
-                      onChange={(e) => setFamilyCount(Number(e.target.value))}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFamilyCount(Number(e.target.value))}
                       className="w-full p-4 bg-white/5 rounded-2xl font-black text-xl text-white outline-none" 
                     />
                   </div>

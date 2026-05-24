@@ -1,27 +1,39 @@
-// src/components/AdminOrders.tsx - Version Web (React + Tailwind)
 import React, { useEffect, useState } from 'react';
 
+// ✅ Interface Order en haut du fichier
 interface Order {
   id: string;
   customer_name: string;
   status: string;
   product_name: string;
   zone: string;
-  complement: string;
+  complement?: string;
   total_price: number;
   deposit_amount: number;
   phone: string;
+  [key: string]: any;
 }
 
 const AdminOrders = () => {
   const [orders, setOrders] = useState<Order[]>([]);
-  const SERVER_IP = import.meta.env.VITE_API_URL?.replace('https://', '').replace('http://', '').split(':')[0] || "127.0.0.1"; 
+  
+  // ✅ Fallback sécurisé si import.meta.env n'est pas reconnu
+  const getApiBase = (): string => {
+    try {
+      // @ts-ignore - Vite injecte import.meta.env au runtime
+      const viteUrl = import.meta.env?.VITE_API_URL;
+      if (viteUrl) return viteUrl.replace(/\/$/, '');
+    } catch (e) {
+      // Ignore si import.meta.env n'est pas disponible au build
+    }
+    return 'http://127.0.0.1:8000';
+  };
 
   const fetchOrders = async () => {
     try {
-      const apiBase = import.meta.env.VITE_API_URL || `http://${SERVER_IP}:8000`;
+      const apiBase = getApiBase();
       const response = await fetch(`${apiBase}/admin/orders`);
-      const data = await response.json();
+      const data: Order[] = await response.json();
       setOrders(data);
     } catch (err) {
       console.log("Erreur de récupération des commandes Kemtchop:", err);
@@ -34,14 +46,16 @@ const AdminOrders = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // ✅ Paramètre typé
   const handleCall = (phone: string) => {
     window.open(`tel:${phone}`, '_self');
   };
 
+  // ✅ Paramètre typé
   const handleMarkDelivered = async (orderId: string) => {
     if (window.confirm("Marquer cette commande comme livrée ?")) {
       try {
-        const apiBase = import.meta.env.VITE_API_URL || `http://${SERVER_IP}:8000`;
+        const apiBase = getApiBase();
         const response = await fetch(`${apiBase}/admin/orders/${orderId}/deliver`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -65,10 +79,9 @@ const AdminOrders = () => {
       <div className="space-y-4">
         {orders.map((order, index) => (
           <div 
-            key={order.id || index} 
+            key={order.id || `order-${index}`} 
             className="bg-white rounded-2xl p-5 shadow-lg border border-gray-100"
           >
-            {/* Header */}
             <div className="flex justify-between items-center mb-3">
               <span className="text-lg font-bold text-red-600">{order.customer_name}</span>
               <span className={`px-3 py-1 rounded-full text-xs font-bold ${
@@ -82,14 +95,12 @@ const AdminOrders = () => {
 
             <hr className="border-gray-200 my-3" />
 
-            {/* Details */}
             <div className="space-y-2 text-sm text-gray-700">
               <p><span className="font-bold">Plat:</span> {order.product_name}</p>
               <p><span className="font-bold">Quartier:</span> {order.zone}</p>
               <p><span className="font-bold">Accompagnement:</span> {order.complement || 'Aucun'}</p>
             </div>
 
-            {/* Prices */}
             <div className="flex justify-between items-center mt-4 pt-3 border-t border-gray-100">
               <div>
                 <p className="font-bold text-gray-800">Total: {order.total_price} FCFA</p>
@@ -97,7 +108,6 @@ const AdminOrders = () => {
               </div>
             </div>
 
-            {/* Actions */}
             <div className="flex gap-3 mt-4">
               <button 
                 onClick={() => handleCall(order.phone)}

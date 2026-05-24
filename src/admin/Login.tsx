@@ -1,16 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, FormEvent, ChangeEvent } from 'react';
 import { Lock, User, Eye, EyeOff } from 'lucide-react';
 
-const Login = ({ onLogin }) => {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+// ✅ Interface pour les props du composant
+interface LoginProps {
+  onLogin?: (data: any) => void;
+}
+
+const Login: React.FC<LoginProps> = ({ onLogin }) => {
+  const [username, setUsername] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [error, setError] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(false);
 
   const SERVER_IP = "127.0.0.1";
 
-  // ✅ Helper pour normaliser les permissions : chaîne CSV → tableau
+  // ✅ Fonction typée
   const normalizePermissions = (perms: string | string[] | null | undefined): string[] => {
     if (!perms) return [];
     if (Array.isArray(perms)) return perms;
@@ -20,7 +25,8 @@ const Login = ({ onLogin }) => {
     return [];
   };
 
-  const handleSubmit = async (e) => {
+  // ✅ Event typé + currentTarget
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -35,40 +41,33 @@ const Login = ({ onLogin }) => {
       const data = await response.json();
 
       if (response.ok) {
-        // ✅ Le backend retourne 'access_token' ou 'token'
         const jwtToken = data.access_token || data.token;
         
         if (jwtToken) {
-          // ✅ Sauvegarder le token
           localStorage.setItem('token', jwtToken);
           
-          // ✅ Normaliser les permissions (CSV → tableau)
           const permissions = normalizePermissions(data.permissions);
           
-          // ✅ Sauvegarder les permissions DANS LES DEUX ENDROITS (compatibilité)
-          // 1. Dans kemtchop_session (format backend)
           const sessionData = {
             ...data,
-            permissions: permissions  // ← Toujours un tableau ici
+            permissions: permissions
           };
           localStorage.setItem('kemtchop_session', JSON.stringify(sessionData));
-          
-          // 2. Dans user_permissions (accès facile pour le frontend)
           localStorage.setItem('user_permissions', JSON.stringify(permissions));
-          
-          // ✅ Sauvegarder les infos utilisateur
           localStorage.setItem('admin_username', data.username || username);
           localStorage.setItem('admin_role', data.role || 'admin');
           
-          console.log('✅ [Login] Token sauvegardé:', jwtToken.substring(0, 30) + '...');
+          console.log('✅ [Login] Token sauvegardé');
           console.log('✅ [Login] Permissions normalisées:', permissions);
         } else {
           console.error('❌ [Login] Aucun token trouvé dans la réponse:', data);
           setError('Token manquant dans la réponse du serveur');
         }
         
-        // ✅ Puis appeler le callback parent
-        onLogin(data); 
+        // ✅ Appel sécurisé du callback
+        if (onLogin) {
+          onLogin(data);
+        }
       } else {
         setError(data.detail || "Identifiants incorrects");
       }
@@ -84,7 +83,6 @@ const Login = ({ onLogin }) => {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-[3rem] shadow-2xl p-10 border border-gray-100">
         
-        {/* LOGO / TITRE */}
         <div className="text-center mb-10">
           <div className="inline-block p-4 bg-black rounded-3xl mb-4">
              <Lock className="text-red-600" size={32} />
@@ -98,7 +96,6 @@ const Login = ({ onLogin }) => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* USERNAME */}
           <div className="relative">
             <User className="absolute left-4 top-4 text-gray-400" size={20} />
             <input
@@ -106,12 +103,11 @@ const Login = ({ onLogin }) => {
               placeholder="Identifiant"
               className="w-full bg-gray-50 border-2 border-transparent focus:border-red-600 focus:bg-white rounded-2xl py-4 pl-12 pr-4 outline-none transition-all font-bold text-sm"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setUsername(e.target.value)}
               required
             />
           </div>
 
-          {/* PASSWORD */}
           <div className="relative">
             <Lock className="absolute left-4 top-4 text-gray-400" size={20} />
             <input
@@ -119,7 +115,7 @@ const Login = ({ onLogin }) => {
               placeholder="Mot de passe"
               className="w-full bg-gray-50 border-2 border-transparent focus:border-red-600 focus:bg-white rounded-2xl py-4 pl-12 pr-12 outline-none transition-all font-bold text-sm"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
               required
             />
             <button
