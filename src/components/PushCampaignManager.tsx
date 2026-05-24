@@ -97,7 +97,7 @@ export default function PushCampaignManager() {
             >
               <option value="all">👥 Tous les utilisateurs</option>
               <option value="affiliates">🤝 Uniquement les affiliés</option>
-              <option value="segment:VIP">⭐ Clients VIP (>50 000F)</option>
+              <option value="segment:VIP">⭐ Clients VIP ({'>'}50 000F)</option>
               <option value="segment:NEW">🆕 Nouveaux clients</option>
             </select>
           </div>
