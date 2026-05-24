@@ -1,5 +1,4 @@
 // src/services/offlineQueue.ts - Version Web compatible (Vercel)
-// Remplace AsyncStorage par localStorage, NetInfo par navigator.onLine
 
 const QUEUE_KEY = 'kemtchop_offline_queue';
 const MAX_RETRIES = 3;
@@ -21,16 +20,14 @@ export class OfflineQueue {
   private isSyncing = false;
   private apiBase: string;
 
-  // ✅ @ts-ignore pour import.meta.env
+  // ✅ SOLUTION FIABLE : cast import.meta en any
   private constructor(apiBase: string = 
-    // @ts-ignore - Vite injecte import.meta.env au runtime
-    import.meta.env?.VITE_API_URL || 'http://localhost:8000'
+    ((import.meta as any).env?.VITE_API_URL) || 'http://localhost:8000'
   ) {
-    this.apiBase = apiBase.replace(/\/$/, ''); // Remove trailing slash
+    this.apiBase = apiBase.replace(/\/$/, '');
     this.loadQueue();
     this.startAutoSync();
     
-    // Écouter les changements de connexion (Web API)
     window.addEventListener('online', () => {
       console.log('📡 Back online, syncing...');
       this.sync();
@@ -47,7 +44,6 @@ export class OfflineQueue {
     return OfflineQueue.instance;
   }
 
-  // ✅ Charger la queue depuis localStorage (Web)
   private loadQueue(): void {
     try {
       const stored = localStorage.getItem(QUEUE_KEY);
@@ -60,7 +56,6 @@ export class OfflineQueue {
     }
   }
 
-  // ✅ Sauvegarder la queue dans localStorage (Web)
   private saveQueue(): void {
     try {
       localStorage.setItem(QUEUE_KEY, JSON.stringify(this.queue));
@@ -69,7 +64,6 @@ export class OfflineQueue {
     }
   }
 
-  // ✅ Ajouter une requête à la queue
   async enqueue(request: Omit<QueuedRequest, 'id' | 'timestamp' | 'retryCount'>): Promise<string> {
     const queued: QueuedRequest = {
       ...request,
@@ -79,7 +73,6 @@ export class OfflineQueue {
       priority: request.priority || 'normal',
     };
 
-    // Insertion par priorité (high en premier)
     if (queued.priority === 'high') {
       this.queue.unshift(queued);
     } else {
@@ -89,7 +82,6 @@ export class OfflineQueue {
     this.saveQueue();
     console.log(`✅ Requête en queue: ${queued.endpoint} (ID: ${queued.id})`);
 
-    // Tenter une sync immédiate si online
     if (navigator.onLine) {
       this.sync();
     }
@@ -97,7 +89,6 @@ export class OfflineQueue {
     return queued.id;
   }
 
-  // ✅ Synchroniser la queue avec le backend
   async sync(): Promise<{ success: number; failed: number }> {
     if (this.isSyncing) {
       console.log('⏳ Sync déjà en cours');
@@ -112,7 +103,6 @@ export class OfflineQueue {
     this.isSyncing = true;
     const results = { success: 0, failed: 0 };
 
-    // Trier par priorité puis par ancienneté
     const sorted = [...this.queue].sort((a, b) => {
       const priorityOrder: Record<string, number> = { high: 0, normal: 1, low: 2 };
       if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
@@ -123,7 +113,6 @@ export class OfflineQueue {
 
     for (const request of sorted) {
       try {
-        // Construire l'URL correctement
         const url = request.endpoint.startsWith('http') 
           ? request.endpoint 
           : `${this.apiBase}/${request.endpoint.replace(/^\//, '')}`;
@@ -138,12 +127,10 @@ export class OfflineQueue {
         });
 
         if (response.ok) {
-          // Supprimer de la queue si succès
           this.queue = this.queue.filter((q) => q.id !== request.id);
           results.success++;
           console.log(`✅ Sync réussi: ${request.endpoint}`);
         } else {
-          // Gérer les erreurs 4xx (ne pas retry) vs 5xx (retry)
           if (response.status >= 500 && request.retryCount < MAX_RETRIES) {
             request.retryCount++;
             console.log(`⚠️ Erreur serveur, retry ${request.retryCount}/${MAX_RETRIES}: ${request.endpoint}`);
@@ -154,7 +141,6 @@ export class OfflineQueue {
           }
         }
       } catch (error) {
-        // Erreur réseau: incrémenter retryCount si possible
         if (request.retryCount < MAX_RETRIES) {
           request.retryCount++;
           console.log(`⚠️ Erreur réseau, retry ${request.retryCount}/${MAX_RETRIES}: ${request.endpoint}`);
@@ -173,14 +159,12 @@ export class OfflineQueue {
     return results;
   }
 
-  // ✅ Démarrer la sync automatique toutes les 30 secondes
   private startAutoSync(): void {
     this.syncInterval = setInterval(() => {
       this.sync();
     }, 30000);
   }
 
-  // ✅ Nettoyer (à appeler si nécessaire)
   destroy(): void {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
@@ -188,7 +172,6 @@ export class OfflineQueue {
     }
   }
 
-  // ✅ Getters pour l'UI
   getQueueLength(): number {
     return this.queue.length;
   }
@@ -197,7 +180,6 @@ export class OfflineQueue {
     return [...this.queue];
   }
 
-  // ✅ Vider la queue (pour debug ou reset)
   clear(): void {
     this.queue = [];
     this.saveQueue();

@@ -19,9 +19,8 @@ export default function PushCampaignManager() {
   const [sending, setSending] = useState<boolean>(false);
   const [result, setResult] = useState<any>(null);
 
-  // ✅ @ts-ignore pour import.meta.env (Vite l'injecte au runtime)
-  // @ts-ignore - Vite injecte import.meta.env au runtime
-  const API_BASE = import.meta.env?.VITE_API_URL || 'http://localhost:8000';
+  // ✅ SOLUTION FIABLE : cast import.meta en any pour éviter l'erreur TS
+  const API_BASE = ((import.meta as any).env?.VITE_API_URL) || 'http://localhost:8000';
   
   const getToken = (): string => {
     try {
