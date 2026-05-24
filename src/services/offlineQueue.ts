@@ -21,7 +21,11 @@ export class OfflineQueue {
   private isSyncing = false;
   private apiBase: string;
 
-  private constructor(apiBase: string = import.meta.env.VITE_API_URL || 'http://localhost:8000') {
+  // ✅ @ts-ignore pour import.meta.env
+  private constructor(apiBase: string = 
+    // @ts-ignore - Vite injecte import.meta.env au runtime
+    import.meta.env?.VITE_API_URL || 'http://localhost:8000'
+  ) {
     this.apiBase = apiBase.replace(/\/$/, ''); // Remove trailing slash
     this.loadQueue();
     this.startAutoSync();
@@ -110,7 +114,7 @@ export class OfflineQueue {
 
     // Trier par priorité puis par ancienneté
     const sorted = [...this.queue].sort((a, b) => {
-      const priorityOrder = { high: 0, normal: 1, low: 2 };
+      const priorityOrder: Record<string, number> = { high: 0, normal: 1, low: 2 };
       if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
         return priorityOrder[a.priority] - priorityOrder[b.priority];
       }
@@ -182,8 +186,6 @@ export class OfflineQueue {
       clearInterval(this.syncInterval);
       this.syncInterval = null;
     }
-    window.removeEventListener('online', () => {});
-    window.removeEventListener('offline', () => {});
   }
 
   // ✅ Getters pour l'UI

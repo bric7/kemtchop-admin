@@ -1,6 +1,6 @@
 // src/components/PushCampaignManager.tsx
-import React, { useState } from 'react';
-import { Send, Users, Bell, AlertCircle } from 'lucide-react';
+import React, { useState, ChangeEvent } from 'react';
+import { Send, Bell, AlertCircle } from 'lucide-react';
 
 interface PushCampaignForm {
   title: string;
@@ -16,13 +16,20 @@ export default function PushCampaignManager() {
     target: 'all',
     data: {},
   });
-  const [sending, setSending] = useState(false);
+  const [sending, setSending] = useState<boolean>(false);
   const [result, setResult] = useState<any>(null);
 
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-  const getToken = () => {
-    const s = JSON.parse(localStorage.getItem('kemtchop_session') || '{}');
-    return s.access_token || s.token || '';
+  // ✅ @ts-ignore pour import.meta.env (Vite l'injecte au runtime)
+  // @ts-ignore - Vite injecte import.meta.env au runtime
+  const API_BASE = import.meta.env?.VITE_API_URL || 'http://localhost:8000';
+  
+  const getToken = (): string => {
+    try {
+      const s = JSON.parse(localStorage.getItem('kemtchop_session') || '{}');
+      return s.access_token || s.token || '';
+    } catch {
+      return '';
+    }
   };
 
   const sendCampaign = async () => {
@@ -71,7 +78,7 @@ export default function PushCampaignManager() {
             <input
               type="text"
               value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => setForm({ ...form, title: e.target.value })}
               placeholder="Ex: 🎉 Nouvelle offre spéciale !"
               className="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-red-100"
             />
@@ -81,7 +88,7 @@ export default function PushCampaignManager() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Message</label>
             <textarea
               value={form.body}
-              onChange={(e) => setForm({ ...form, body: e.target.value })}
+              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setForm({ ...form, body: e.target.value })}
               placeholder="Ex: -20% sur tous les plats ce weekend..."
               rows={4}
               className="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-red-100 resize-none"
@@ -92,7 +99,7 @@ export default function PushCampaignManager() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Cible</label>
             <select
               value={form.target}
-              onChange={(e) => setForm({ ...form, target: e.target.value as any })}
+              onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm({ ...form, target: e.target.value as 'all' | 'affiliates' | 'segment:VIP' | 'segment:NEW' })}
               className="w-full px-4 py-2 border rounded-xl focus:ring-2 focus:ring-red-100"
             >
               <option value="all">👥 Tous les utilisateurs</option>
