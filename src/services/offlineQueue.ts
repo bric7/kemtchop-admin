@@ -1,9 +1,7 @@
-// src/services/offlineQueue.ts
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo from '@react-native-community/netinfo';
-import { log } from '../utils/platform';
+// src/services/offlineQueue.ts - Version Web compatible (Vercel)
+// Remplace AsyncStorage par localStorage, NetInfo par navigator.onLine
 
-const QUEUE_KEY = '@kemtchop:offline_queue';
+const QUEUE_KEY = 'kemtchop_offline_queue';
 const MAX_RETRIES = 3;
 
 export interface QueuedRequest {
@@ -19,48 +17,51 @@ export interface QueuedRequest {
 export class OfflineQueue {
   private static instance: OfflineQueue;
   private queue: QueuedRequest[] = [];
-  private syncInterval: NodeJS.Timeout | null = null;
+  private syncInterval: ReturnType<typeof setInterval> | null = null;
   private isSyncing = false;
+  private apiBase: string;
 
-  private constructor() {
+  private constructor(apiBase: string = import.meta.env.VITE_API_URL || 'http://localhost:8000') {
+    this.apiBase = apiBase.replace(/\/$/, ''); // Remove trailing slash
     this.loadQueue();
     this.startAutoSync();
     
-    // Écouter les changements de connexion
-    NetInfo.addEventListener((state) => {
-      log('📡 Connexion:', state.isConnected ? 'ONLINE' : 'OFFLINE');
-      if (state.isConnected) {
-        this.sync();
-      }
+    // Écouter les changements de connexion (Web API)
+    window.addEventListener('online', () => {
+      console.log('📡 Back online, syncing...');
+      this.sync();
+    });
+    window.addEventListener('offline', () => {
+      console.log('📴 Going offline, queuing requests');
     });
   }
 
-  static getInstance(): OfflineQueue {
+  static getInstance(apiBase?: string): OfflineQueue {
     if (!OfflineQueue.instance) {
-      OfflineQueue.instance = new OfflineQueue();
+      OfflineQueue.instance = new OfflineQueue(apiBase);
     }
     return OfflineQueue.instance;
   }
 
-  // ✅ Charger la queue depuis AsyncStorage
-  private async loadQueue(): Promise<void> {
+  // ✅ Charger la queue depuis localStorage (Web)
+  private loadQueue(): void {
     try {
-      const stored = await AsyncStorage.getItem(QUEUE_KEY);
+      const stored = localStorage.getItem(QUEUE_KEY);
       if (stored) {
         this.queue = JSON.parse(stored);
-        log(`📦 Queue chargée: ${this.queue.length} requêtes en attente`);
+        console.log(`📦 Queue chargée: ${this.queue.length} requêtes en attente`);
       }
     } catch (e) {
-      log('❌ Erreur chargement queue:', e);
+      console.error('❌ Erreur chargement queue:', e);
     }
   }
 
-  // ✅ Sauvegarder la queue dans AsyncStorage
-  private async saveQueue(): Promise<void> {
+  // ✅ Sauvegarder la queue dans localStorage (Web)
+  private saveQueue(): void {
     try {
-      await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(this.queue));
+      localStorage.setItem(QUEUE_KEY, JSON.stringify(this.queue));
     } catch (e) {
-      log('❌ Erreur sauvegarde queue:', e);
+      console.error('❌ Erreur sauvegarde queue:', e);
     }
   }
 
@@ -81,12 +82,11 @@ export class OfflineQueue {
       this.queue.push(queued);
     }
 
-    await this.saveQueue();
-    log(`✅ Requête en queue: ${queued.endpoint} (ID: ${queued.id})`);
+    this.saveQueue();
+    console.log(`✅ Requête en queue: ${queued.endpoint} (ID: ${queued.id})`);
 
     // Tenter une sync immédiate si online
-    const state = await NetInfo.fetch();
-    if (state.isConnected) {
+    if (navigator.onLine) {
       this.sync();
     }
 
@@ -96,13 +96,12 @@ export class OfflineQueue {
   // ✅ Synchroniser la queue avec le backend
   async sync(): Promise<{ success: number; failed: number }> {
     if (this.isSyncing) {
-      log('⏳ Sync déjà en cours');
+      console.log('⏳ Sync déjà en cours');
       return { success: 0, failed: 0 };
     }
 
-    const state = await NetInfo.fetch();
-    if (!state.isConnected) {
-      log('📴 Offline: sync reportée');
+    if (!navigator.onLine) {
+      console.log('📴 Offline: sync reportée');
       return { success: 0, failed: 0 };
     }
 
@@ -120,9 +119,17 @@ export class OfflineQueue {
 
     for (const request of sorted) {
       try {
-        const response = await fetch(`http://${request.endpoint.startsWith('http') ? '' : '127.0.0.1:8000/'}${request.endpoint}`, {
+        // Construire l'URL correctement
+        const url = request.endpoint.startsWith('http') 
+          ? request.endpoint 
+          : `${this.apiBase}/${request.endpoint.replace(/^\//, '')}`;
+
+        const response = await fetch(url, {
           method: request.method,
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('admin_token') || ''}`
+          },
           body: JSON.stringify(request.payload),
         });
 
@@ -130,35 +137,35 @@ export class OfflineQueue {
           // Supprimer de la queue si succès
           this.queue = this.queue.filter((q) => q.id !== request.id);
           results.success++;
-          log(`✅ Sync réussi: ${request.endpoint}`);
+          console.log(`✅ Sync réussi: ${request.endpoint}`);
         } else {
           // Gérer les erreurs 4xx (ne pas retry) vs 5xx (retry)
           if (response.status >= 500 && request.retryCount < MAX_RETRIES) {
             request.retryCount++;
-            log(`⚠️ Erreur serveur, retry ${request.retryCount}/${MAX_RETRIES}: ${request.endpoint}`);
+            console.log(`⚠️ Erreur serveur, retry ${request.retryCount}/${MAX_RETRIES}: ${request.endpoint}`);
           } else {
             this.queue = this.queue.filter((q) => q.id !== request.id);
             results.failed++;
-            log(`❌ Échec définitif: ${request.endpoint} (status: ${response.status})`);
+            console.log(`❌ Échec définitif: ${request.endpoint} (status: ${response.status})`);
           }
         }
       } catch (error) {
         // Erreur réseau: incrémenter retryCount si possible
         if (request.retryCount < MAX_RETRIES) {
           request.retryCount++;
-          log(`⚠️ Erreur réseau, retry ${request.retryCount}/${MAX_RETRIES}: ${request.endpoint}`);
+          console.log(`⚠️ Erreur réseau, retry ${request.retryCount}/${MAX_RETRIES}: ${request.endpoint}`);
         } else {
           this.queue = this.queue.filter((q) => q.id !== request.id);
           results.failed++;
-          log(`❌ Échec après ${MAX_RETRIES} retries: ${request.endpoint}`);
+          console.log(`❌ Échec après ${MAX_RETRIES} retries: ${request.endpoint}`);
         }
       }
     }
 
-    await this.saveQueue();
+    this.saveQueue();
     this.isSyncing = false;
     
-    log(`🔄 Sync terminée: ${results.success} succès, ${results.failed} échecs`);
+    console.log(`🔄 Sync terminée: ${results.success} succès, ${results.failed} échecs`);
     return results;
   }
 
@@ -169,12 +176,14 @@ export class OfflineQueue {
     }, 30000);
   }
 
-  // ✅ Nettoyer (à appeler au démontage de l'app si nécessaire)
+  // ✅ Nettoyer (à appeler si nécessaire)
   destroy(): void {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
       this.syncInterval = null;
     }
+    window.removeEventListener('online', () => {});
+    window.removeEventListener('offline', () => {});
   }
 
   // ✅ Getters pour l'UI
@@ -187,9 +196,9 @@ export class OfflineQueue {
   }
 
   // ✅ Vider la queue (pour debug ou reset)
-  async clear(): Promise<void> {
+  clear(): void {
     this.queue = [];
-    await this.saveQueue();
-    log('🗑️ Queue vidée');
+    this.saveQueue();
+    console.log('🗑️ Queue vidée');
   }
 }
