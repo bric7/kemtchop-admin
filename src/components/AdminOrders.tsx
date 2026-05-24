@@ -1,13 +1,26 @@
+// src/components/AdminOrders.tsx - Version Web (React + Tailwind)
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, Linking, Alert } from 'react-native';
+
+interface Order {
+  id: string;
+  customer_name: string;
+  status: string;
+  product_name: string;
+  zone: string;
+  complement: string;
+  total_price: number;
+  deposit_amount: number;
+  phone: string;
+}
 
 const AdminOrders = () => {
-  const [orders, setOrders] = useState([]);
-  const SERVER_IP = "127.0.0.1"; 
+  const [orders, setOrders] = useState<Order[]>([]);
+  const SERVER_IP = import.meta.env.VITE_API_URL?.replace('https://', '').replace('http://', '').split(':')[0] || "127.0.0.1"; 
 
   const fetchOrders = async () => {
     try {
-      const response = await fetch(`http://${SERVER_IP}:8000/admin/orders`);
+      const apiBase = import.meta.env.VITE_API_URL || `http://${SERVER_IP}:8000`;
+      const response = await fetch(`${apiBase}/admin/orders`);
       const data = await response.json();
       setOrders(data);
     } catch (err) {
@@ -17,73 +30,100 @@ const AdminOrders = () => {
 
   useEffect(() => {
     fetchOrders();
-    const interval = setInterval(fetchOrders, 20000); // Rafraîchissement auto
+    const interval = setInterval(fetchOrders, 20000);
     return () => clearInterval(interval);
   }, []);
 
-  const renderOrder = ({ item }: any) => (
-    <View style={styles.card}>
-      <View style={styles.headerRow}>
-        <Text style={styles.customerName}>{item.customer_name}</Text>
-        <Text style={styles.statusBadge}>{item.status}</Text>
-      </View>
+  const handleCall = (phone: string) => {
+    window.open(`tel:${phone}`, '_self');
+  };
 
-      <View style={styles.divider} />
-
-      <Text style={styles.info}><Text style={styles.bold}>Plat:</Text> {item.product_name}</Text>
-      <Text style={styles.info}><Text style={styles.bold}>Quartier:</Text> {item.zone}</Text>
-      <Text style={styles.info}><Text style={styles.bold}>Accompagnement:</Text> {item.complement}</Text>
-      
-      <View style={styles.priceRow}>
-        <Text style={styles.totalPrice}>Total: {item.total_price} FCFA</Text>
-        <Text style={styles.deposit}>Acompte: {item.deposit_amount} FCFA</Text>
-      </View>
-
-      <View style={styles.actionRow}>
-        <TouchableOpacity 
-          style={styles.btnCall} 
-          onPress={() => Linking.openURL(`tel:${item.phone}`)}
-        >
-          <Text style={styles.btnText}>Appeler</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.btnDone}>
-          <Text style={styles.btnTextWhite}>Livré</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+  const handleMarkDelivered = async (orderId: string) => {
+    if (window.confirm("Marquer cette commande comme livrée ?")) {
+      try {
+        const apiBase = import.meta.env.VITE_API_URL || `http://${SERVER_IP}:8000`;
+        const response = await fetch(`${apiBase}/admin/orders/${orderId}/deliver`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        if (response.ok) {
+          alert("✅ Commande marquée comme livrée");
+          fetchOrders();
+        }
+      } catch (err) {
+        alert("Erreur lors de la mise à jour");
+      }
+    }
+  };
 
   return (
-    <View style={styles.container}>
-      <FlatList
-        data={orders}
-        keyExtractor={(_, index) => index.toString()}
-        renderItem={renderOrder}
-        ListHeaderComponent={<Text style={styles.mainTitle}>Gestion des Commandes</Text>}
-      />
-    </View>
+    <div className="p-6 bg-gray-50 min-h-screen">
+      <h1 className="text-2xl font-black text-center text-gray-800 mb-6">
+        Gestion des Commandes
+      </h1>
+      
+      <div className="space-y-4">
+        {orders.map((order, index) => (
+          <div 
+            key={order.id || index} 
+            className="bg-white rounded-2xl p-5 shadow-lg border border-gray-100"
+          >
+            {/* Header */}
+            <div className="flex justify-between items-center mb-3">
+              <span className="text-lg font-bold text-red-600">{order.customer_name}</span>
+              <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                order.status === 'livré' ? 'bg-green-100 text-green-700' :
+                order.status === 'en cours' ? 'bg-blue-100 text-blue-700' :
+                'bg-gray-100 text-gray-700'
+              }`}>
+                {order.status}
+              </span>
+            </div>
+
+            <hr className="border-gray-200 my-3" />
+
+            {/* Details */}
+            <div className="space-y-2 text-sm text-gray-700">
+              <p><span className="font-bold">Plat:</span> {order.product_name}</p>
+              <p><span className="font-bold">Quartier:</span> {order.zone}</p>
+              <p><span className="font-bold">Accompagnement:</span> {order.complement || 'Aucun'}</p>
+            </div>
+
+            {/* Prices */}
+            <div className="flex justify-between items-center mt-4 pt-3 border-t border-gray-100">
+              <div>
+                <p className="font-bold text-gray-800">Total: {order.total_price} FCFA</p>
+                <p className="text-sm text-green-600 font-bold">Acompte: {order.deposit_amount} FCFA</p>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-3 mt-4">
+              <button 
+                onClick={() => handleCall(order.phone)}
+                className="flex-1 py-3 px-4 border-2 border-gray-700 text-gray-700 font-bold rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                📞 Appeler
+              </button>
+              
+              <button 
+                onClick={() => handleMarkDelivered(order.id)}
+                className="flex-1 py-3 px-4 bg-gray-800 text-white font-bold rounded-xl hover:bg-gray-900 transition-colors"
+              >
+                ✅ Livré
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {orders.length === 0 && (
+        <div className="text-center py-12 text-gray-500">
+          <p className="text-lg">Aucune commande en attente 🎉</p>
+        </div>
+      )}
+    </div>
   );
 };
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F4F4F4', padding: 10 },
-  mainTitle: { fontSize: 24, fontWeight: '900', color: '#333', marginVertical: 20, textAlign: 'center' },
-  card: { backgroundColor: '#FFF', borderRadius: 15, padding: 15, marginBottom: 15, elevation: 4 },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  customerName: { fontSize: 18, fontWeight: 'bold', color: '#E31C25' },
-  statusBadge: { backgroundColor: '#EEE', padding: 5, borderRadius: 5, fontSize: 10, fontWeight: 'bold' },
-  divider: { height: 1, backgroundColor: '#EEE', marginVertical: 10 },
-  info: { fontSize: 14, color: '#444', marginBottom: 3 },
-  bold: { fontWeight: 'bold' },
-  priceRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
-  totalPrice: { fontWeight: 'bold', color: '#333' },
-  deposit: { fontWeight: 'bold', color: '#28A745' },
-  actionRow: { flexDirection: 'row', gap: 10, marginTop: 15 },
-  btnCall: { flex: 1, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#333', alignItems: 'center' },
-  btnDone: { flex: 1, padding: 12, borderRadius: 10, backgroundColor: '#333', alignItems: 'center' },
-  btnText: { fontWeight: 'bold', color: '#333' },
-  btnTextWhite: { fontWeight: 'bold', color: '#FFF' },
-});
 
 export default AdminOrders;
