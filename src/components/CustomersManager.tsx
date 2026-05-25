@@ -7,24 +7,56 @@ export default function CustomersManager() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const SERVER_IP = "127.0.0.1";
-  const getSession = () => JSON.parse(localStorage.getItem('kemtchop_session') || 'null');
+  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
+  const getApiBase = (): string => {
+    try {
+      // @ts-ignore - Vite injecte import.meta.env au runtime
+      const viteUrl = ((import.meta as any).env?.VITE_API_URL);
+      if (viteUrl) return viteUrl.replace(/\/$/, '');
+    } catch (e) {
+      // Ignore si import.meta.env n'est pas disponible au build
+    }
+    return 'http://localhost:8000';
+  };
+
+  // ✅ Helper pour extraire le token JWT
+  const getSession = (): { access_token?: string; token?: string } | null => {
+    try {
+      return JSON.parse(localStorage.getItem('kemtchop_session') || 'null');
+    } catch (e) {
+      console.error("❌ Erreur parse session:", e);
+      return null;
+    }
+  };
+
+  const getToken = (): string => {
+    const session = getSession();
+    return session?.access_token || session?.token || "";
+  };
 
   // ✅ Charger uniquement les clients (ceux sans username = pas d'accès admin)
   const fetchCustomers = async () => {
-    const session = getSession();
-    if (!session) return;
+    const token = getToken();
+    if (!token) return;
+    
     try {
-      const response = await fetch(`http://${SERVER_IP}:8000/admin/users`, {
-        headers: { 'Authorization': `Bearer ${session.access_token || session.token}` }
+      const apiBase = getApiBase();
+      const response = await fetch(`${apiBase}/admin/users`, {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
       if (!response.ok) throw new Error(`Erreur: ${response.status}`);
       const data = await response.json();
       // ✅ Filtrer : ne garder que les clients (pas de username OU role = 'customer')
       const custs = (Array.isArray(data) ? data : []).filter((u: any) => !u.username || u.role === 'customer');
       setCustomers(custs);
-    } catch (e) { console.error("Erreur chargement clients:", e); }
-    finally { setLoading(false); }
+    } catch (e) { 
+      console.error("Erreur chargement clients:", e); 
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   useEffect(() => { fetchCustomers(); }, []);

@@ -21,10 +21,27 @@ export default function CampaignManager() {
   const [messageTemplate, setMessageTemplate] = useState("");
   const [sending, setSending] = useState(false);
 
-  const SERVER_IP = "127.0.0.1";
-  const getToken = () => {
-    const s = JSON.parse(localStorage.getItem("kemtchop_session") || "{}");
-    return s.access_token || s.token || "";
+  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
+  const getApiBase = (): string => {
+    try {
+      // @ts-ignore - Vite injecte import.meta.env au runtime
+      const viteUrl = ((import.meta as any).env?.VITE_API_URL);
+      if (viteUrl) return viteUrl.replace(/\/$/, '');
+    } catch (e) {
+      // Ignore si import.meta.env n'est pas disponible au build
+    }
+    return 'http://localhost:8000';
+  };
+
+  // ✅ Helper pour extraire le token JWT
+  const getToken = (): string => {
+    try {
+      const s = JSON.parse(localStorage.getItem("kemtchop_session") || "{}");
+      return s.access_token || s.token || "";
+    } catch (e) {
+      console.error("❌ Erreur parse session:", e);
+      return "";
+    }
   };
 
   // Charger les cibles selon le type de campagne
@@ -34,12 +51,19 @@ export default function CampaignManager() {
     if (!token) { setLoading(false); return; }
 
     try {
+      const apiBase = getApiBase();
       const url =
         campaignType === "abandoned_cart"
-          ? `http://${SERVER_IP}:8000/admin/analytics/abandoned-carts?hours=48&min_cart_value=1000`
-          : `http://${SERVER_IP}:8000/admin/analytics/video-interest?hours=72`;
+          ? `${apiBase}/admin/analytics/abandoned-carts?hours=48&min_cart_value=1000`
+          : `${apiBase}/admin/analytics/video-interest?hours=72`;
 
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(url, { 
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        } 
+      });
+      
       if (res.ok) {
         const data = await res.json();
         setTargets(Array.isArray(data) ? data : []);
