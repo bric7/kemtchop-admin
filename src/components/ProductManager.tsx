@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, ChangeEvent, FormEvent, SyntheticEvent } from "react";
 import { Edit3, Trash2, X, Save, Loader2, Image as ImageIcon, Video } from "lucide-react";
 
 // ✅ Interface déplacée EN DEHORS du composant
@@ -21,21 +21,53 @@ const ProductManager = () => {
   const [soloPrice, setSoloPrice] = useState<number>(0);
   const [familyCount, setFamilyCount] = useState<number>(3);
   
-  const SERVER_IP = "127.0.0.1"; 
+  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
+  const getApiBase = (): string => {
+    try {
+      // @ts-ignore - Vite injecte import.meta.env au runtime
+      const viteUrl = ((import.meta as any).env?.VITE_API_URL);
+      if (viteUrl) return viteUrl.replace(/\/$/, '');
+    } catch (e) {
+      // Ignore si import.meta.env n'est pas disponible au build
+    }
+    return 'http://localhost:8000';
+  };
 
-  // ✅ Fonction typée
+  // ✅ Helper pour extraire le token JWT
+  const getAuthToken = (): string | null => {
+    try {
+      const sessionRaw = localStorage.getItem('kemtchop_session');
+      if (!sessionRaw) return null;
+      const session = JSON.parse(sessionRaw);
+      return session.access_token || session.token || null;
+    } catch (e) {
+      console.error('❌ Erreur parse session:', e);
+      return null;
+    }
+  };
+
+  // ✅ Fonction typée pour corriger les URLs de médias
   const getCorrectUrl = (url: string | undefined): string => {
     if (!url) return "https://via.placeholder.com/400x300?text=Pas+de+média";
+    
+    const apiBase = getApiBase();
+    
     if (url.includes("/videos/")) {
       const fileName = url.split("/videos/").pop();
-      return `http://${SERVER_IP}:8000/videos/${fileName}`;
+      return `${apiBase}/videos/${fileName}`;
     }
-    return url.startsWith('http') ? url : `http://${SERVER_IP}:8000${url}`;
+    
+    return url.startsWith('http') ? url : `${apiBase}${url}`;
   };
 
   const fetchProducts = async () => {
     try {
-      const res = await fetch(`http://${SERVER_IP}:8000/admin/products`);
+      const apiBase = getApiBase();
+      const token = getAuthToken();
+      
+      const res = await fetch(`${apiBase}/admin/products`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
       const data: Product[] = await res.json();
       setProducts(data);
     } catch (error) {
@@ -51,7 +83,13 @@ const ProductManager = () => {
   const handleDelete = async (id: string, name: string) => {
     if (window.confirm(`Voulez-vous vraiment supprimer "${name}" ?`)) {
       try {
-        const res = await fetch(`http://${SERVER_IP}:8000/admin/products/${id}`, { method: 'DELETE' });
+        const apiBase = getApiBase();
+        const token = getAuthToken();
+        
+        const res = await fetch(`${apiBase}/admin/products/${id}`, { 
+          method: 'DELETE',
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
         if (res.ok) {
           alert("✅ Produit supprimé.");
           fetchProducts();
@@ -63,7 +101,7 @@ const ProductManager = () => {
   };
 
   // ✅ Event typé + null check pour editingProduct
-  const handleUpdate = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleUpdate = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!editingProduct) return; // ✅ Protection null
     
@@ -74,9 +112,13 @@ const ProductManager = () => {
     formData.append("price_family", (soloPrice * familyCount - 500).toString());
 
     try {
-      const response = await fetch(`http://${SERVER_IP}:8000/admin/products/${editingProduct.id}`, {
+      const apiBase = getApiBase();
+      const token = getAuthToken();
+      
+      const response = await fetch(`${apiBase}/admin/products/${editingProduct.id}`, {
         method: "PATCH",
         body: formData,
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
       });
       if (response.ok) {
         setEditingProduct(null);
@@ -100,7 +142,7 @@ const ProductManager = () => {
                 alt={p.product_name} 
                 className="w-full h-full object-cover" 
                 // ✅ onError avec type React + currentTarget
-                onError={(e: React.SyntheticEvent<HTMLImageElement, Event>) => { 
+                onError={(e: SyntheticEvent<HTMLImageElement, Event>) => { 
                   e.currentTarget.onerror = null; 
                   e.currentTarget.src = "https://via.placeholder.com/400x300?text=Erreur+Image"; 
                 }}
@@ -165,7 +207,7 @@ const ProductManager = () => {
                     <label className="text-[10px] font-black uppercase text-gray-500 italic">Prix Solo (Base)</label>
                     <input 
                       name="price" type="number" value={soloPrice}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSoloPrice(Number(e.target.value))}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => setSoloPrice(Number(e.target.value))}
                       className="w-full p-4 bg-white/5 rounded-2xl font-black text-xl text-red-500 outline-none" 
                     />
                   </div>
@@ -173,7 +215,7 @@ const ProductManager = () => {
                     <label className="text-[10px] font-black uppercase text-gray-500 italic">Nb Pers. Famille</label>
                     <input 
                       name="family_size" type="number" value={familyCount}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFamilyCount(Number(e.target.value))}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => setFamilyCount(Number(e.target.value))}
                       className="w-full p-4 bg-white/5 rounded-2xl font-black text-xl text-white outline-none" 
                     />
                   </div>

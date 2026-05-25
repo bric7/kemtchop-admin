@@ -8,33 +8,61 @@ export default function AffiliatesManager() {
   const [loading, setLoading] = useState(true);
   const [copiedId, setCopiedId] = useState<number | null>(null);
 
-  const SERVER_IP = "127.0.0.1";
-  const BASE_URL = `http://${SERVER_IP}:8000`;
+  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
+  const getApiBase = (): string => {
+    try {
+      // @ts-ignore - Vite injecte import.meta.env au runtime
+      const viteUrl = ((import.meta as any).env?.VITE_API_URL);
+      if (viteUrl) return viteUrl.replace(/\/$/, '');
+    } catch (e) {
+      // Ignore si import.meta.env n'est pas disponible au build
+    }
+    return 'http://localhost:8000';
+  };
 
-  const getSession = () => JSON.parse(localStorage.getItem('kemtchop_session') || 'null');
+  // ✅ Helper pour extraire le token JWT
+  const getAuthToken = (): string | null => {
+    try {
+      const sessionRaw = localStorage.getItem('kemtchop_session');
+      if (!sessionRaw) return null;
+      const session = JSON.parse(sessionRaw);
+      return session.access_token || session.token || null;
+    } catch (e) {
+      console.error('❌ Erreur parse session:', e);
+      return null;
+    }
+  };
 
   // ✅ Charger uniquement les affiliés (is_affiliate = true)
   const fetchAffiliates = async () => {
-    const session = getSession();
-    if (!session) return;
+    const token = getAuthToken();
+    if (!token) return;
+    
     try {
-      const response = await fetch(`${BASE_URL}/admin/users`, {
-        headers: { 'Authorization': `Bearer ${session.access_token || session.token}` }
+      const apiBase = getApiBase();
+      const response = await fetch(`${apiBase}/admin/users`, {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
       if (!response.ok) throw new Error(`Erreur: ${response.status}`);
       const data = await response.json();
       // ✅ Filtrer : ne garder que les affiliés
       const affs = (Array.isArray(data) ? data : []).filter((u: any) => u.is_affiliate);
       setAffiliates(affs);
-    } catch (e) { console.error("Erreur chargement affiliés:", e); }
-    finally { setLoading(false); }
+    } catch (e) { 
+      console.error("Erreur chargement affiliés:", e); 
+    } finally { 
+      setLoading(false); 
+    }
   };
 
-  useEffect(() => { fetchAffiliates(); }, []);
+  useEffect(() => { 
+    fetchAffiliates(); 
+  }, []);
 
   // ✅ Générer le lien de parrainage
   const getReferralLink = (affiliateCode: string) => {
-    return `${BASE_URL}/home?ref=${affiliateCode}`;
+    const apiBase = getApiBase();
+    return `${apiBase}/home?ref=${affiliateCode}`;
   };
 
   // ✅ Copier le lien dans le presse-papier
