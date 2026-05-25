@@ -5,11 +5,34 @@ import { Search, ShieldAlert, User, RefreshCw, Trash2, AlertTriangle, Filter } f
 export default function UsersManager() {
   const [users, setUsers] = useState<any[]>([]);
   const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState<string>("all"); // ✅ Filtre par rôle
+  const [roleFilter, setRoleFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
-  const SERVER_IP = "127.0.0.1";
+  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
+  const getApiBase = (): string => {
+    try {
+      // @ts-ignore - Vite injecte import.meta.env au runtime
+      const viteUrl = ((import.meta as any).env?.VITE_API_URL);
+      if (viteUrl) return viteUrl.replace(/\/$/, '');
+    } catch (e) {
+      // Ignore si import.meta.env n'est pas disponible au build
+    }
+    return 'http://localhost:8000';
+  };
+
+  // ✅ Helper pour extraire le token JWT
+  const getAuthToken = (): string | null => {
+    try {
+      const sessionRaw = localStorage.getItem('kemtchop_session');
+      if (!sessionRaw) return null;
+      const session = JSON.parse(sessionRaw);
+      return session.access_token || session.token || null;
+    } catch (e) {
+      console.error('❌ Erreur parse session:', e);
+      return null;
+    }
+  };
 
   // ✅ Helper pour récupérer la session
   const getSession = () => {
@@ -55,17 +78,18 @@ export default function UsersManager() {
   }, []);
 
   const fetchUsers = async () => {
-    const session = getSession();
-    if (!session) {
+    const token = getAuthToken();
+    if (!token) {
       console.error('❌ Session manquante');
       setLoading(false);
       return;
     }
 
     try {
-      const response = await fetch(`http://${SERVER_IP}:8000/admin/users`, {
+      const apiBase = getApiBase();
+      const response = await fetch(`${apiBase}/admin/users`, {
         headers: {
-          'Authorization': `Bearer ${session.access_token || session.token}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       });
@@ -88,8 +112,9 @@ export default function UsersManager() {
 
   // 2. Fonction de suppression protégée
   const handleDelete = async (userId: number, targetUsername: string, targetRole: string) => {
+    const token = getAuthToken();
     const session = getSession();
-    if (!session) { alert('⚠️ Session expirée. Reconnecte-toi.'); return; }
+    if (!token || !session) { alert('⚠️ Session expirée. Reconnecte-toi.'); return; }
 
     if (targetUsername === session.username) { alert("🚫 Tu ne peux pas supprimer ton propre compte !"); return; }
     if (['admin', 'super_admin'].includes(targetRole) && !['admin', 'super_admin'].includes(session.role)) {
@@ -100,31 +125,49 @@ export default function UsersManager() {
 
     setDeletingId(userId);
     try {
-      const response = await fetch(`http://${SERVER_IP}:8000/admin/users/${userId}`, {
+      const apiBase = getApiBase();
+      const response = await fetch(`${apiBase}/admin/users/${userId}`, {
         method: "DELETE",
-        headers: { 'Authorization': `Bearer ${session.access_token || session.token}`, 'Content-Type': 'application/json' }
+        headers: { 
+          'Authorization': `Bearer ${token}`, 
+          'Content-Type': 'application/json' 
+        }
       });
 
-      if (response.status === 401 || response.status === 403) { alert('⚠️ Session expirée ou accès refusé.'); return; }
+      if (response.status === 401 || response.status === 403) { 
+        alert('⚠️ Session expirée ou accès refusé.'); 
+        return; 
+      }
       const result = await response.json();
 
-      if (response.ok) { alert("✅ Accès révoqué avec succès"); fetchUsers(); }
-      else { alert(result.detail || "❌ Erreur lors de la suppression"); }
+      if (response.ok) { 
+        alert("✅ Accès révoqué avec succès"); 
+        fetchUsers(); 
+      } else { 
+        alert(result.detail || "❌ Erreur lors de la suppression"); 
+      }
     } catch (err) {
       console.error("❌ Erreur suppression:", err);
       alert("❌ Erreur de connexion au serveur");
-    } finally { setDeletingId(null); }
+    } finally { 
+      setDeletingId(null); 
+    }
   };
 
   // 3. Fonction de réinitialisation de mot de passe
   const handleSendSetupLink = async (phone: string, userName: string) => {
+    const token = getAuthToken();
     const session = getSession();
-    if (!session) { alert('⚠️ Session expirée. Reconnecte-toi.'); return; }
+    if (!token || !session) { alert('⚠️ Session expirée. Reconnecte-toi.'); return; }
 
     try {
-      const response = await fetch(`http://${SERVER_IP}:8000/admin/generate-reset-link/${phone}`, {
+      const apiBase = getApiBase();
+      const response = await fetch(`${apiBase}/admin/generate-reset-link/${phone}`, {
         method: "POST",
-        headers: { 'Authorization': `Bearer ${session.access_token || session.token}`, 'Content-Type': 'application/json' }
+        headers: { 
+          'Authorization': `Bearer ${token}`, 
+          'Content-Type': 'application/json' 
+        }
       });
       const data = await response.json();
 
