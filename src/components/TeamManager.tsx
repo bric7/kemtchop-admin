@@ -12,8 +12,6 @@ interface TeamMemberModalProps {
   editingUser?: any | null;
 }
 
-// ✅ Remplace TOUT le composant TeamMemberModal par celui-ci :
-
 const TeamMemberModal: React.FC<TeamMemberModalProps> = ({ 
   isOpen, 
   onClose, 
@@ -24,7 +22,7 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
     customer_name: '',
     username: '',
     phone: '',
-    password: '',  // ✅ Toujours requis en création si username défini
+    password: '',
     role: 'manager',
     permissions: [] as string[],
   });
@@ -35,12 +33,11 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
     if (isOpen) {
       setError(null);
       if (editingUser) {
-        // Mode édition : pré-remplir (sans mot de passe)
         setFormData({
           customer_name: editingUser.customer_name || '',
           username: editingUser.username || '',
           phone: editingUser.phone || '',
-          password: '',  // Jamais pré-remplir
+          password: '',
           role: editingUser.role || 'manager',
           permissions: editingUser.permissions 
             ? (typeof editingUser.permissions === 'string' 
@@ -49,7 +46,6 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
             : [],
         });
       } else {
-        // Mode création : formulaire vide
         setFormData({
           customer_name: '',
           username: '',
@@ -76,7 +72,6 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
     e.preventDefault();
     setError(null);
     
-    // ✅ Validation frontend
     if (!formData.customer_name.trim()) {
       setError("Nom complet requis");
       return;
@@ -126,14 +121,12 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
         </div>
         
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {/* Message d'erreur */}
           {error && (
             <div className="p-3 bg-red-50 text-red-700 rounded-xl text-sm font-medium">
               ⚠️ {error}
             </div>
           )}
           
-          {/* Nom complet */}
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-1">Nom complet *</label>
             <input
@@ -146,7 +139,6 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
             />
           </div>
           
-          {/* Username */}
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-1">
               Username (obligatoire pour l'accès admin panel) *
@@ -164,7 +156,6 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
             </p>
           </div>
           
-          {/* Téléphone */}
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-1">Téléphone *</label>
             <input
@@ -177,7 +168,6 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
             />
           </div>
           
-          {/* Mot de passe - TOUJOURS visible en création */}
           {!editingUser && (
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-1">
@@ -198,7 +188,6 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
             </div>
           )}
           
-          {/* Rôle */}
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-1">Rôle *</label>
             <select
@@ -212,7 +201,6 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
             </select>
           </div>
           
-          {/* Permissions */}
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-2">Permissions *</label>
             <div className="grid grid-cols-2 gap-2">
@@ -233,7 +221,6 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
             </p>
           </div>
           
-          {/* Boutons */}
           <div className="flex gap-3 pt-4">
             <button
               type="button"
@@ -261,62 +248,81 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
 // ✅ COMPOSANT PRINCIPAL TeamManager
 // ============================================================
 export default function TeamManager() {
-  // ✅ TOUS LES HOOKS DOIVENT ÊTRE ICI, DANS LE COMPOSANT
   const [team, setTeam] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  
-  // ✅ États pour le modal d'ajout/modification
   const [modalOpen, setModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<any | null>(null);
 
-  const SERVER_IP = "127.0.0.1";
-
-  const getSession = () => {
-    const raw = localStorage.getItem('kemtchop_session');
-    return raw ? JSON.parse(raw) : null;
+  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
+  const getApiBase = (): string => {
+    try {
+      // @ts-ignore - Vite injecte import.meta.env au runtime
+      const viteUrl = ((import.meta as any).env?.VITE_API_URL);
+      if (viteUrl) return viteUrl.replace(/\/$/, '');
+    } catch (e) {
+      // Ignore si import.meta.env n'est pas disponible au build
+    }
+    return 'http://localhost:8000';
   };
 
-  const getAuthToken = () => {
-    const session = getSession();
-    return session?.access_token || session?.token || null;
+  // ✅ Helper pour extraire le token JWT
+  const getAuthToken = (): string | null => {
+    try {
+      const sessionRaw = localStorage.getItem('kemtchop_session');
+      if (!sessionRaw) return null;
+      const session = JSON.parse(sessionRaw);
+      return session.access_token || session.token || null;
+    } catch (e) {
+      console.error('❌ Erreur parse session:', e);
+      return null;
+    }
+  };
+
+  const getSession = () => {
+    try {
+      const raw = localStorage.getItem('kemtchop_session');
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      console.error('❌ Erreur parse session:', e);
+      return null;
+    }
   };
 
   // ✅ Fonction pour créer/modifier un utilisateur via l'API backend
- const handleSubmitUser = async (data: any) => {
-  const session = getSession();
-  const token = getAuthToken();
-  if (!session || !token) throw new Error('Session invalide');
+  const handleSubmitUser = async (data: any) => {
+    const token = getAuthToken();
+    if (!token) throw new Error('Session invalide');
 
-  const url = editingUser 
-    ? `http://${SERVER_IP}:8000/admin/users/${editingUser.id}`
-    : `http://${SERVER_IP}:8000/admin/users`;
-  
-  const method = editingUser ? 'PUT' : 'POST';
-  
-  console.log(`📡 ${method} ${url}`, data);
-  
-  const response = await fetch(url, {
-    method,
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(data)
-  });
+    const apiBase = getApiBase();
+    const url = editingUser 
+      ? `${apiBase}/admin/users/${editingUser.id}`
+      : `${apiBase}/admin/users`;
+    
+    const method = editingUser ? 'PUT' : 'POST';
+    
+    console.log(`📡 ${method} ${url}`, data);
+    
+    const response = await fetch(url, {
+      method,
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    });
 
-  const result = await response.json();
-  console.log(`📥 Réponse ${response.status}:`, result);
-  
-  if (!response.ok) {
-    // ✅ Afficher l'erreur précise du backend
-    throw new Error(result.detail || `Erreur ${response.status}: ${response.statusText}`);
-  }
-  
-  alert(`✅ ${editingUser ? 'Modifications' : 'Compte'} enregistré avec succès !`);
-  fetchTeam(); // Rafraîchir la liste
-};
+    const result = await response.json();
+    console.log(`📥 Réponse ${response.status}:`, result);
+    
+    if (!response.ok) {
+      throw new Error(result.detail || `Erreur ${response.status}: ${response.statusText}`);
+    }
+    
+    alert(`✅ ${editingUser ? 'Modifications' : 'Compte'} enregistré avec succès !`);
+    fetchTeam();
+  };
 
   // ✅ Charger UNIQUEMENT les membres d'équipe (accès admin panel)
   const fetchTeam = async () => {
@@ -324,7 +330,8 @@ export default function TeamManager() {
     if (!token) { setLoading(false); return; }
 
     try {
-      const response = await fetch(`http://${SERVER_IP}:8000/admin/users`, {
+      const apiBase = getApiBase();
+      const response = await fetch(`${apiBase}/admin/users`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -337,8 +344,8 @@ export default function TeamManager() {
       
       // ✅ FILTRAGE CRITIQUE : ne garder que l'équipe interne
       const teamMembers = (Array.isArray(data) ? data : []).filter((u: any) => 
-        u.username && u.username.trim() &&  // ← Accès admin panel requis
-        ['admin', 'manager', 'cuisine', 'livreur'].includes(u.role)  // ← Rôles d'équipe uniquement
+        u.username && u.username.trim() &&
+        ['admin', 'manager', 'cuisine', 'livreur'].includes(u.role)
       );
       
       setTeam(teamMembers);
@@ -378,7 +385,8 @@ export default function TeamManager() {
 
     setDeletingId(userId);
     try {
-      const response = await fetch(`http://${SERVER_IP}:8000/admin/users/${userId}`, {
+      const apiBase = getApiBase();
+      const response = await fetch(`${apiBase}/admin/users/${userId}`, {
         method: "DELETE",
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
       });
@@ -405,7 +413,8 @@ export default function TeamManager() {
     if (!token) return;
     
     try {
-      const response = await fetch(`http://${SERVER_IP}:8000/admin/generate-reset-link/${phone}`, {
+      const apiBase = getApiBase();
+      const response = await fetch(`${apiBase}/admin/generate-reset-link/${phone}`, {
         method: "POST",
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
       });
@@ -452,7 +461,6 @@ export default function TeamManager() {
           <button onClick={fetchTeam} className="p-2 text-gray-400 hover:text-gray-600" title="Actualiser">
             <RefreshCw size={18} />
           </button>
-          {/* ✅ Bouton Ajouter un membre */}
           <button
             onClick={() => { setEditingUser(null); setModalOpen(true); }}
             className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-xl font-bold text-sm hover:bg-red-700 transition"
@@ -503,7 +511,6 @@ export default function TeamManager() {
                     <td className="px-6 py-4 text-sm text-gray-500">{user.phone || 'N/A'}</td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2">
-                        {/* Bouton Modifier */}
                         <button
                           onClick={() => { setEditingUser(user); setModalOpen(true); }}
                           className="px-3 py-1.5 text-[10px] font-black uppercase border rounded hover:bg-blue-50 flex items-center gap-1"
@@ -512,7 +519,6 @@ export default function TeamManager() {
                           ✏️ Modifier
                         </button>
                         
-                        {/* Bouton Assigner une tâche */}
                         <button
                           onClick={() => handleAssignTask(user)}
                           className="px-3 py-1.5 text-[10px] font-black uppercase border rounded hover:bg-blue-50 flex items-center gap-1"
@@ -522,7 +528,6 @@ export default function TeamManager() {
                           Tâche
                         </button>
                         
-                        {/* Bouton Reset Password */}
                         <button
                           onClick={() => handleSendSetupLink(user.phone, user.customer_name)}
                           className="px-3 py-1.5 text-[10px] font-black uppercase border rounded hover:bg-gray-50"
@@ -530,7 +535,6 @@ export default function TeamManager() {
                           Reset
                         </button>
                         
-                        {/* Bouton Supprimer (conditionnel) */}
                         {canDelete ? (
                           <button
                             onClick={() => handleDelete(user.id, user.username, user.role)}
