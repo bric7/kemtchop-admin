@@ -19,9 +19,19 @@ export default function PushCampaignManager() {
   const [sending, setSending] = useState<boolean>(false);
   const [result, setResult] = useState<any>(null);
 
-  // ✅ SOLUTION FIABLE : cast import.meta en any pour éviter l'erreur TS
-  const API_BASE = ((import.meta as any).env?.VITE_API_URL) || 'http://localhost:8000';
-  
+  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
+  const getApiBase = (): string => {
+    try {
+      // @ts-ignore - Vite injecte import.meta.env au runtime
+      const viteUrl = ((import.meta as any).env?.VITE_API_URL);
+      if (viteUrl) return viteUrl.replace(/\/$/, '');
+    } catch (e) {
+      // Ignore si import.meta.env n'est pas disponible au build
+    }
+    return 'http://localhost:8000';
+  };
+
+  // ✅ Helper pour extraire le token JWT
   const getToken = (): string => {
     try {
       const s = JSON.parse(localStorage.getItem('kemtchop_session') || '{}');
@@ -40,7 +50,8 @@ export default function PushCampaignManager() {
     const token = getToken();
     
     try {
-      const response = await fetch(`${API_BASE}/admin/notifications/send`, {
+      const apiBase = getApiBase();
+      const response = await fetch(`${apiBase}/admin/notifications/send`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

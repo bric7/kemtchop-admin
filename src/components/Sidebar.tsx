@@ -1,11 +1,21 @@
+// src/components/Sidebar.tsx
 import React, { useState } from "react";
 import { 
   LayoutDashboard, PlusCircle, ShoppingBag, Settings, Truck,
   UtensilsCrossed, LogOut, UserCheck, Users, Wallet, ShieldAlert, Bug
 } from "lucide-react";
 
+// ✅ Interface pour la session utilisateur
+interface UserSession {
+  role: string;
+  permissions: string[];
+  username: string;
+  raw: string | null;
+  error?: string;
+}
+
 // ✅ Helper pour lire les permissions FRAÎCHES
-const getCurrentSession = () => {
+const getCurrentSession = (): UserSession => {
   try {
     const raw = localStorage.getItem('kemtchop_session');
     if (!raw) return { role: 'guest', permissions: [], username: '', raw: null };
@@ -22,12 +32,24 @@ const getCurrentSession = () => {
       username: session.username || '',
       raw: raw
     };
-  } catch (e) {
+  } catch (e: any) {
     return { role: 'guest', permissions: [], username: '', raw: null, error: String(e) };
   }
 };
 
-export default function Sidebar({ activeTab, setActiveTab }: any) {
+// ✅ Interface pour les éléments du menu
+interface MenuItem {
+  id: string;
+  name: string;
+  icon: React.ReactNode;
+}
+
+interface SidebarProps {
+  activeTab: string;
+  setActiveTab: (tab: string) => void;
+}
+
+export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const [showDebug, setShowDebug] = useState(false);
   
   // Lire les permissions à chaque rendu
@@ -35,7 +57,7 @@ export default function Sidebar({ activeTab, setActiveTab }: any) {
   const { role: userRole, permissions: userPermissions, username, raw, error } = session;
 
   // Liste complète des menus
-  const allMenuItems = [
+  const allMenuItems: MenuItem[] = [
     { id: 'dashboard', name: 'Tableau de bord', icon: <LayoutDashboard size={20}/> },
     { id: 'orders', name: 'Commandes', icon: <ShoppingBag size={20}/> },
     { id: 'products', name: 'Ajouter un Plat', icon: <PlusCircle size={20}/> },
@@ -99,7 +121,12 @@ export default function Sidebar({ activeTab, setActiveTab }: any) {
           {error && <p className="mt-2 text-red-400">❌ Erreur: {error}</p>}
           
           <button 
-            onClick={() => { navigator.clipboard.writeText(raw || ''); alert('Copié!'); }}
+            onClick={() => { 
+              if (raw) {
+                navigator.clipboard.writeText(raw); 
+                alert('Copié!'); 
+              }
+            }}
             className="mt-3 w-full py-1 bg-gray-800 rounded hover:bg-gray-700"
           >
             📋 Copier session JSON
