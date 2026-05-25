@@ -1,7 +1,6 @@
 import React, { useState, FormEvent, ChangeEvent } from 'react';
 import { Lock, User, Eye, EyeOff } from 'lucide-react';
 
-// ✅ Interface pour les props du composant
 interface LoginProps {
   onLogin?: (data: any) => void;
 }
@@ -13,9 +12,10 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
 
-  const SERVER_IP = "127.0.0.1";
+  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
+  // Fallback vers localhost uniquement en dev local
+  const API_BASE = ((import.meta as any).env?.VITE_API_URL) || 'http://localhost:8000';
 
-  // ✅ Fonction typée
   const normalizePermissions = (perms: string | string[] | null | undefined): string[] => {
     if (!perms) return [];
     if (Array.isArray(perms)) return perms;
@@ -25,14 +25,16 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     return [];
   };
 
-  // ✅ Event typé + currentTarget
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
     try {
-      const response = await fetch(`http://${SERVER_IP}:8000/auth/login`, {
+      // ✅ Utiliser API_BASE au lieu de SERVER_IP hardcoded
+      console.log('🔍 [Login] Tentative de connexion à:', `${API_BASE}/auth/login`);
+      
+      const response = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -64,7 +66,6 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           setError('Token manquant dans la réponse du serveur');
         }
         
-        // ✅ Appel sécurisé du callback
         if (onLogin) {
           onLogin(data);
         }
@@ -72,8 +73,12 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         setError(data.detail || "Identifiants incorrects");
       }
     } catch (err) {
-      console.error('❌ Erreur login:', err);
-      setError("Impossible de contacter le serveur de sécurité");
+      console.error('❌ Erreur login:', {
+        message: err instanceof Error ? err.message : String(err),
+        apiBase: API_BASE,
+        url: `${API_BASE}/auth/login`
+      });
+      setError("Impossible de contacter le serveur. Vérifie ta connexion.");
     } finally {
       setLoading(false);
     }
