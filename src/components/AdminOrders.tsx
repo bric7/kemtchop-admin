@@ -17,22 +17,48 @@ interface Order {
 const AdminOrders = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   
-  // ✅ Fallback sécurisé si import.meta.env n'est pas reconnu
+  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
   const getApiBase = (): string => {
     try {
       // @ts-ignore - Vite injecte import.meta.env au runtime
-      const viteUrl = import.meta.env?.VITE_API_URL;
+      const viteUrl = ((import.meta as any).env?.VITE_API_URL);
       if (viteUrl) return viteUrl.replace(/\/$/, '');
     } catch (e) {
       // Ignore si import.meta.env n'est pas disponible au build
     }
-    return 'http://127.0.0.1:8000';
+    return 'http://localhost:8000';
+  };
+
+  // ✅ Helper pour extraire le token JWT
+  const getAuthToken = (): string | null => {
+    try {
+      const sessionRaw = localStorage.getItem('kemtchop_session');
+      if (!sessionRaw) return null;
+      const session = JSON.parse(sessionRaw);
+      return session.access_token || session.token || null;
+    } catch (e) {
+      console.error('❌ Erreur parse session:', e);
+      return null;
+    }
   };
 
   const fetchOrders = async () => {
     try {
       const apiBase = getApiBase();
-      const response = await fetch(`${apiBase}/admin/orders`);
+      const token = getAuthToken();
+      
+      const response = await fetch(`${apiBase}/admin/orders`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` }),
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
       const data: Order[] = await response.json();
       setOrders(data);
     } catch (err) {
@@ -51,20 +77,29 @@ const AdminOrders = () => {
     window.open(`tel:${phone}`, '_self');
   };
 
-  // ✅ Paramètre typé
+  // ✅ Paramètre typé + token + apiBase
   const handleMarkDelivered = async (orderId: string) => {
     if (window.confirm("Marquer cette commande comme livrée ?")) {
       try {
         const apiBase = getApiBase();
+        const token = getAuthToken();
+        
         const response = await fetch(`${apiBase}/admin/orders/${orderId}/deliver`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            ...(token && { 'Authorization': `Bearer ${token}` }),
+          },
         });
+        
         if (response.ok) {
           alert("✅ Commande marquée comme livrée");
           fetchOrders();
+        } else {
+          alert("Erreur lors de la mise à jour");
         }
       } catch (err) {
+        console.error("Erreur mark delivered:", err);
         alert("Erreur lors de la mise à jour");
       }
     }

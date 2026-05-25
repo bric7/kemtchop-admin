@@ -13,7 +13,17 @@ const Dashboard = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   
-  const SERVER_IP = "127.0.0.1";
+  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
+  const getApiBase = (): string => {
+    try {
+      // @ts-ignore - Vite injecte import.meta.env au runtime
+      const viteUrl = ((import.meta as any).env?.VITE_API_URL);
+      if (viteUrl) return viteUrl.replace(/\/$/, '');
+    } catch (e) {
+      // Ignore si import.meta.env n'est pas disponible au build
+    }
+    return 'http://localhost:8000';
+  };
 
   // ✅ Helper robuste pour extraire le token (gère les deux formats)
   const getAuthToken = (): string | null => {
@@ -36,21 +46,22 @@ const Dashboard = () => {
       setError(null);
       
       const token = getAuthToken();
+      const apiBase = getApiBase();
       
       if (!token) {
         console.error('❌ Token manquant ou invalide');
         setError("Session invalide. Veuillez vous reconnecter.");
         setLoading(false);
-        // Optionnel: rediriger vers login après un délai
-        // setTimeout(() => window.location.href = '/login', 2000);
         return;
       }
       
       try {
-        const response = await fetch(`http://${SERVER_IP}:8000/admin/stats`, {
+        console.log('🔍 [Dashboard] Fetch stats from:', `${apiBase}/admin/stats`);
+        
+        const response = await fetch(`${apiBase}/admin/stats`, {
           method: 'GET',
           headers: {
-            'Authorization': `Bearer ${token}`,  // ✅ Token garanti non-undefined
+            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
           },
         });
@@ -84,7 +95,7 @@ const Dashboard = () => {
     };
 
     fetchStats();
-  }, []);  // Exécuté une fois au montage
+  }, []);
 
   // ✅ UI d'erreur avec action de reconnexion
   if (error) {
