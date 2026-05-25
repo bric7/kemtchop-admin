@@ -2,7 +2,18 @@ import React, { useEffect, useState } from "react";
 
 const OrdersList = () => {
   const [orders, setOrders] = useState<any[]>([]);
-  const SERVER_IP = "127.0.0.1"; 
+
+  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
+  const getApiBase = (): string => {
+    try {
+      // @ts-ignore - Vite injecte import.meta.env au runtime
+      const viteUrl = ((import.meta as any).env?.VITE_API_URL);
+      if (viteUrl) return viteUrl.replace(/\/$/, '');
+    } catch (e) {
+      // Ignore si import.meta.env n'est pas disponible au build
+    }
+    return 'http://localhost:8000';
+  };
 
   // ✅ Helper inline pour vérifier les permissions
   const hasPermission = (required: string): boolean => {
@@ -25,7 +36,6 @@ const OrdersList = () => {
         let perms = session.permissions;
         
         if (typeof perms === 'string') {
-          // Convertir "dashboard,orders" → ["dashboard", "orders"]
           return perms.split(',').map((p: string) => p.trim()).includes(required);
         }
         if (Array.isArray(perms)) {
@@ -58,11 +68,16 @@ const OrdersList = () => {
   }
 
   // --- FONCTION POUR RÉCUPÉRER LE TOKEN ---
-  const getAuthToken = () => {
-    const session = localStorage.getItem('kemtchop_session');
-    if (!session) return null;
-    const parsed = JSON.parse(session);
-    return parsed.access_token || parsed.token;
+  const getAuthToken = (): string | null => {
+    try {
+      const session = localStorage.getItem('kemtchop_session');
+      if (!session) return null;
+      const parsed = JSON.parse(session);
+      return parsed.access_token || parsed.token || null;
+    } catch (e) {
+      console.error('❌ Erreur parse session:', e);
+      return null;
+    }
   };
 
   const fetchOrders = async () => {
@@ -70,9 +85,11 @@ const OrdersList = () => {
     if (!token) return;
 
     try {
-      const response = await fetch(`http://${SERVER_IP}:8000/admin/orders`, {
+      const apiBase = getApiBase();
+      const response = await fetch(`${apiBase}/admin/orders`, {
         headers: {
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
       });
       
@@ -100,12 +117,14 @@ const OrdersList = () => {
     const nextStatus = statusFlow[currentStatus] || "termine";
 
     try {
+      const apiBase = getApiBase();
       const response = await fetch(
-        `http://${SERVER_IP}:8000/admin/orders/${orderId}/status?new_status=${nextStatus}`,
+        `${apiBase}/admin/orders/${orderId}/status?new_status=${nextStatus}`,
         { 
           method: "PATCH",
           headers: {
-            'Authorization': `Bearer ${token}`
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
           }
         }
       );

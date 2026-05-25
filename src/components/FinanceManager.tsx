@@ -1,13 +1,29 @@
 import React, { useEffect, useState } from 'react';
 
 const FinanceManager = () => {
-  const [payouts, setPayouts] = useState([]);
+  const [payouts, setPayouts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const SERVER_IP = "127.0.0.1"; 
+
+  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
+  const getApiBase = (): string => {
+    try {
+      // @ts-ignore - Vite injecte import.meta.env au runtime
+      const viteUrl = ((import.meta as any).env?.VITE_API_URL);
+      if (viteUrl) return viteUrl.replace(/\/$/, '');
+    } catch (e) {
+      // Ignore si import.meta.env n'est pas disponible au build
+    }
+    return 'http://localhost:8000';
+  };
 
   // ✅ Helper pour récupérer le token admin (même clé que Login.tsx)
-  const getAdminToken = () => {
-    return localStorage.getItem('token'); // ← Doit correspondre à localStorage.setItem('token', ...) dans Login.tsx
+  const getAdminToken = (): string | null => {
+    try {
+      return localStorage.getItem('token');
+    } catch (e) {
+      console.error('❌ Erreur parse token:', e);
+      return null;
+    }
   };
 
   const fetchPayouts = async () => {
@@ -16,23 +32,23 @@ const FinanceManager = () => {
     const token = getAdminToken();
     if (!token) {
       console.error('❌ Token admin manquant → redirection vers login');
-      // Optionnel : window.location.href = '/admin/login';
       setLoading(false);
       return;
     }
     
     try {
-      const res = await fetch(`http://${SERVER_IP}:8000/admin/payouts/pending`, {
+      const apiBase = getApiBase();
+      const res = await fetch(`${apiBase}/admin/payouts/pending`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${token}`, // ✅ C'EST ÇA QUI MANQUAIT !
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       });
       
       if (res.status === 401) {
         console.error('❌ Token invalide ou expiré');
-        localStorage.removeItem('token'); // Nettoyer le token invalide
+        localStorage.removeItem('token');
         return;
       }
       
@@ -61,10 +77,11 @@ const FinanceManager = () => {
     }
     
     try {
-      const response = await fetch(`http://${SERVER_IP}:8000/admin/orders/${orderId}/pay-commission`, { 
+      const apiBase = getApiBase();
+      const response = await fetch(`${apiBase}/admin/orders/${orderId}/pay-commission`, { 
         method: "PATCH",
         headers: {
-          'Authorization': `Bearer ${token}`, // ✅ Token aussi pour PATCH
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       });
@@ -77,7 +94,7 @@ const FinanceManager = () => {
 
       if (response.ok) {
         console.log(`✅ Paiement validé pour la commande #${orderId}`);
-        fetchPayouts(); // Rafraîchir la liste
+        fetchPayouts();
       } else {
         const errorData = await response.json().catch(() => ({}));
         alert("Erreur: " + (errorData.detail || response.status));

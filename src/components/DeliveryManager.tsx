@@ -7,51 +7,83 @@ export default function DeliveryManager() {
   const [basePrice, setBasePrice] = useState(1000);
   const [loading, setLoading] = useState(false);
 
+  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
+  const getApiBase = (): string => {
+    try {
+      // @ts-ignore - Vite injecte import.meta.env au runtime
+      const viteUrl = ((import.meta as any).env?.VITE_API_URL);
+      if (viteUrl) return viteUrl.replace(/\/$/, '');
+    } catch (e) {
+      // Ignore si import.meta.env n'est pas disponible au build
+    }
+    return 'http://localhost:8000';
+  };
+
+  // ✅ Helper pour extraire le token JWT
+  const getAuthToken = (): string | null => {
+    try {
+      const sessionRaw = localStorage.getItem('kemtchop_session');
+      if (!sessionRaw) return null;
+      const session = JSON.parse(sessionRaw);
+      return session.access_token || session.token || null;
+    } catch (e) {
+      console.error('❌ Erreur parse session:', e);
+      return null;
+    }
+  };
+
   // 1. Charger les réglages depuis le backend au démarrage
   useEffect(() => {
-    fetch('http://localhost:8000/admin/settings/delivery-zones')
-      .then(res => res.json())
-      .then(data => {
+    const fetchSettings = async () => {
+      try {
+        const apiBase = getApiBase();
+        const token = getAuthToken();
+        
+        const res = await fetch(`${apiBase}/admin/settings/delivery-zones`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        const data = await res.json();
         setZones(data.zones || []);
         setBasePrice(data.price || 1000);
-      })
-      .catch(err => console.error("Erreur Backend:", err));
+      } catch (err) {
+        console.error("Erreur Backend:", err);
+      }
+    };
+    fetchSettings();
   }, []);
 
   // 2. Fonction pour ajouter une zone à la liste locale
   const addZone = () => {
     const formattedZone = newZone.trim();
     if (formattedZone) {
-      // On évite d'ajouter deux fois le même quartier
       if (!zones.includes(formattedZone)) {
         setZones([...zones, formattedZone]);
       }
-      setNewZone(''); // On vide le champ après l'ajout
+      setNewZone('');
     }
   };
 
+  // 🔍 Récupérer le token admin depuis le storage
+  const handleSave = async () => {
+    setLoading(true);
     
-    // 🔍 Récupérer le token admin depuis le storage
-    // Adapte la clé selon ton code : 'admin_token', 'token', 'auth_token', etc.
-    const handleSave = async () => {
-  setLoading(true);
-  
-  const adminToken = localStorage.getItem('token');  // ← Même clé que Login
-  console.log('🔍 [DeliveryManager] Token trouvé:', adminToken ? 'OUI (length=' + adminToken.length + ')' : 'NON');
-  
-  if (!adminToken) {
-    console.error('❌ [DeliveryManager] Token manquant → alerte session expirée');
-    alert('⚠️ Session admin expirée. Reconnecte-toi pour sauvegarder.');
-    setLoading(false);
-    return;
+    const token = getAuthToken();
+    console.log('🔍 [DeliveryManager] Token trouvé:', token ? 'OUI (length=' + token.length + ')' : 'NON');
+    
+    if (!token) {
+      console.error('❌ [DeliveryManager] Token manquant → alerte session expirée');
+      alert('⚠️ Session admin expirée. Reconnecte-toi pour sauvegarder.');
+      setLoading(false);
+      return;
     }
 
     try {
-      const response = await fetch('http://localhost:8000/admin/settings/update-zones', {
+      const apiBase = getApiBase();
+      const response = await fetch(`${apiBase}/admin/settings/update-zones`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${adminToken}` // ✅ C'EST ÇA QUI MANQUAIT !
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({ zones, price: basePrice }),
       });
@@ -59,8 +91,6 @@ export default function DeliveryManager() {
       if (response.status === 401) {
         console.error('❌ Token invalide ou expiré');
         alert('Session expirée. Reconnecte-toi à l\'admin.');
-        // Optionnel : vider le token et rediriger
-        localStorage.removeItem('admin_token');
         localStorage.removeItem('token');
         return;
       }
