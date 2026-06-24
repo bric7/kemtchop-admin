@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from "react";
+// OrdersList.tsx - Version corrigée (Rules of Hooks respectées)
+import React, { useEffect, useState, useMemo } from "react";
 
 const OrdersList = () => {
   const [orders, setOrders] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
-  const getApiBase = (): string => {
+  const getApiBase = useMemo((): string => {
     try {
       // @ts-ignore - Vite injecte import.meta.env au runtime
       const viteUrl = ((import.meta as any).env?.VITE_API_URL);
@@ -13,16 +15,16 @@ const OrdersList = () => {
       // Ignore si import.meta.env n'est pas disponible au build
     }
     return 'http://localhost:8000';
-  };
+  }, []);
 
   // ✅ Helper inline pour vérifier les permissions
-  const hasPermission = (required: string): boolean => {
+  const hasPermission = useMemo((): boolean => {
     // 1. Essayer user_permissions (format tableau JSON)
     const userPermsRaw = localStorage.getItem('user_permissions');
     if (userPermsRaw) {
       try {
         const perms = JSON.parse(userPermsRaw);
-        if (Array.isArray(perms) && perms.includes(required)) return true;
+        if (Array.isArray(perms) && perms.includes('orders')) return true;
       } catch (e) {
         console.error('❌ Erreur parse user_permissions:', e);
       }
@@ -36,10 +38,10 @@ const OrdersList = () => {
         let perms = session.permissions;
         
         if (typeof perms === 'string') {
-          return perms.split(',').map((p: string) => p.trim()).includes(required);
+          return perms.split(',').map((p: string) => p.trim()).includes('orders');
         }
         if (Array.isArray(perms)) {
-          return perms.includes(required);
+          return perms.includes('orders');
         }
       } catch (e) {
         console.error('❌ Erreur parse kemtchop_session:', e);
@@ -47,10 +49,68 @@ const OrdersList = () => {
     }
     
     return false;
-  };
+  }, []);
 
-  // ✅ Vérification des permissions AU DÉBUT du composant
-  if (!hasPermission('orders')) {
+  // --- FONCTION POUR RÉCUPÉRER LE TOKEN ---
+  const getAuthToken = useMemo((): string | null => {
+    try {
+      const session = localStorage.getItem('kemtchop_session');
+      if (!session) return null;
+      const parsed = JSON.parse(session);
+      return parsed.access_token || parsed.token || null;
+    } catch (e) {
+      console.error('❌ Erreur parse session:', e);
+      return null;
+    }
+  }, []);
+
+  // ✅ CORRECTION : useEffect APPELÉ AVANT TOUT RETURN CONDITIONNEL
+  useEffect(() => {
+    // Si pas de permission, ne pas fetch (mais le hook est TOUJOURS appelé)
+    if (!hasPermission) {
+      setLoading(false);
+      return;
+    }
+
+    const fetchOrders = async () => {
+      const token = getAuthToken();
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const apiBase = getApiBase;
+        const response = await fetch(`${apiBase}/admin/orders`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (!response.ok) throw new Error("Accès refusé");
+        
+        const data = await response.json();
+        setOrders(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error("Erreur fetch orders:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchOrders();
+    
+    // Polling toutes les 5 secondes si authentifié
+    const interval = setInterval(() => {
+      if (getAuthToken()) fetchOrders();
+    }, 5000); 
+    
+    return () => clearInterval(interval);
+  }, [hasPermission, getApiBase, getAuthToken]); // ✅ Dependencies déclarées
+
+  // ✅ Return conditionnel APRÈS tous les hooks
+  if (!hasPermission) {
     return (
       <div className="p-8 text-center animate-in fade-in duration-300">
         <div className="text-6xl mb-4">🔒</div>
@@ -67,41 +127,16 @@ const OrdersList = () => {
     );
   }
 
-  // --- FONCTION POUR RÉCUPÉRER LE TOKEN ---
-  const getAuthToken = (): string | null => {
-    try {
-      const session = localStorage.getItem('kemtchop_session');
-      if (!session) return null;
-      const parsed = JSON.parse(session);
-      return parsed.access_token || parsed.token || null;
-    } catch (e) {
-      console.error('❌ Erreur parse session:', e);
-      return null;
-    }
-  };
+  // Loading state
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600"></div>
+      </div>
+    );
+  }
 
-  const fetchOrders = async () => {
-    const token = getAuthToken();
-    if (!token) return;
-
-    try {
-      const apiBase = getApiBase();
-      const response = await fetch(`${apiBase}/admin/orders`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (!response.ok) throw new Error("Accès refusé");
-      
-      const data = await response.json();
-      setOrders(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error("Erreur fetch orders:", err);
-    }
-  };
-
+  // Handler pour changer le statut d'une commande
   const handleNextStatus = async (orderId: number, currentStatus: string) => {
     const token = getAuthToken();
     if (!token) return;
@@ -117,7 +152,7 @@ const OrdersList = () => {
     const nextStatus = statusFlow[currentStatus] || "termine";
 
     try {
-      const apiBase = getApiBase();
+      const apiBase = getApiBase;
       const response = await fetch(
         `${apiBase}/admin/orders/${orderId}/status?new_status=${nextStatus}`,
         { 
@@ -130,7 +165,20 @@ const OrdersList = () => {
       );
 
       if (response.ok) {
-        fetchOrders(); 
+        // Refresh immédiat après mise à jour
+        const fetchOrders = async () => {
+          const response = await fetch(`${apiBase}/admin/orders`, {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
+          });
+          if (response.ok) {
+            const data = await response.json();
+            setOrders(Array.isArray(data) ? data : []);
+          }
+        };
+        fetchOrders();
       } else {
         alert("Erreur: Vous n'avez pas les droits pour modifier cette commande.");
       }
@@ -139,14 +187,7 @@ const OrdersList = () => {
     }
   };
 
-  useEffect(() => {
-    fetchOrders();
-    const interval = setInterval(() => {
-      if (getAuthToken()) fetchOrders();
-    }, 5000); 
-    return () => clearInterval(interval);
-  }, []);
-
+  // Composant de colonne réutilisable
   const renderColumn = (title: string, statusList: string[], bgColor: string) => {
     const filteredOrders = orders.filter((order: any) => 
         statusList.includes(order.status)
@@ -215,6 +256,12 @@ const OrdersList = () => {
               </div>
             </div>
           ))}
+          
+          {sortedOrders.length === 0 && (
+            <div className="text-center py-8 text-gray-400 text-sm font-bold">
+              Aucune commande
+            </div>
+          )}
         </div>
       </div>
     );

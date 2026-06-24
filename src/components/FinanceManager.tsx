@@ -1,109 +1,93 @@
+// FinanceManager.tsx - Version corrigée pour cohérence d'authentification
 import React, { useEffect, useState } from 'react';
+// ✅ IMPORT CRITIQUE : Utiliser le client API centralisé
+import { api, hasPermission, logout } from '@/services/api';
 
 const FinanceManager = () => {
   const [payouts, setPayouts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
-  const getApiBase = (): string => {
-    try {
-      // @ts-ignore - Vite injecte import.meta.env au runtime
-      const viteUrl = ((import.meta as any).env?.VITE_API_URL);
-      if (viteUrl) return viteUrl.replace(/\/$/, '');
-    } catch (e) {
-      // Ignore si import.meta.env n'est pas disponible au build
-    }
-    return 'http://localhost:8000';
-  };
-
-  // ✅ Helper pour récupérer le token admin (même clé que Login.tsx)
-  const getAdminToken = (): string | null => {
-    try {
-      return localStorage.getItem('token');
-    } catch (e) {
-      console.error('❌ Erreur parse token:', e);
-      return null;
-    }
-  };
-
-  const fetchPayouts = async () => {
-    setLoading(true);
-    
-    const token = getAdminToken();
-    if (!token) {
-      console.error('❌ Token admin manquant → redirection vers login');
+  // ✅ Vérification des permissions AU DÉBUT (avant tout fetch)
+  useEffect(() => {
+    if (!hasPermission('manage_users')) {
+      setError('Vous n\'avez pas la permission pour gérer les paiements.');
       setLoading(false);
       return;
     }
     
+    fetchPayouts();
+  }, []);
+
+  const fetchPayouts = async () => {
+    setLoading(true);
+    setError(null);
+    
     try {
-      const apiBase = getApiBase();
-      const res = await fetch(`${apiBase}/admin/payouts/pending`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      if (res.status === 401) {
-        console.error('❌ Token invalide ou expiré');
-        localStorage.removeItem('token');
-        return;
-      }
-      
-      if (!res.ok) {
-        throw new Error(`Erreur HTTP: ${res.status}`);
-      }
-      
-      const data = await res.json();
+      // ✅ Utiliser le client API centralisé (gère token + URL automatiquement)
+      const data = await api.get('/admin/payouts/pending', true);
       setPayouts(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error("Erreur fetch payouts:", err);
+    } catch (err: any) {
+      console.error("❌ Erreur fetch payouts:", err);
+      
+      // Gestion des erreurs d'authentification
+      if (err.message?.includes('Authentification requise') || err.message?.includes('401')) {
+        setError('Session expirée. Veuillez vous reconnecter.');
+        // Optionnel : logout automatique
+        // logout();
+        // window.location.href = '/admin/login';
+      } else {
+        setError(err.message || 'Impossible de charger les paiements.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { 
-    fetchPayouts(); 
-  }, []);
-
   const confirmPayment = async (orderId: number) => {
-    const token = getAdminToken();
-    if (!token) {
-      alert('⚠️ Session expirée. Reconnecte-toi.');
-      return;
-    }
-    
     try {
-      const apiBase = getApiBase();
-      const response = await fetch(`${apiBase}/admin/orders/${orderId}/pay-commission`, { 
-        method: "PATCH",
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (response.status === 401) {
+      // ✅ Utiliser le client API centralisé pour PATCH
+      await api.patch(`/admin/orders/${orderId}/pay-commission`, {}, true);
+      
+      console.log(`✅ Paiement validé pour la commande #${orderId}`);
+      
+      // Refresh immédiat de la liste
+      fetchPayouts();
+      
+    } catch (err: any) {
+      console.error("❌ Erreur validation paiement:", err);
+      
+      if (err.message?.includes('Authentification requise') || err.message?.includes('401')) {
         alert('⚠️ Session expirée. Reconnecte-toi.');
-        localStorage.removeItem('token');
-        return;
-      }
-
-      if (response.ok) {
-        console.log(`✅ Paiement validé pour la commande #${orderId}`);
-        fetchPayouts();
+        logout();
+        // Optionnel : redirection
+        // window.location.href = '/admin/login';
       } else {
-        const errorData = await response.json().catch(() => ({}));
-        alert("Erreur: " + (errorData.detail || response.status));
+        const errorMsg = err.message?.includes('Network') || err.message?.includes('Failed to fetch')
+          ? 'Impossible de joindre le serveur. Vérifie ta connexion.'
+          : err.message || 'Erreur lors de la validation du paiement.';
+        alert(errorMsg);
       }
-    } catch (error) {
-      console.error("❌ Erreur réseau:", error);
-      alert("Impossible de joindre le serveur. Vérifie ta connexion.");
     }
   };
+
+  // ✅ Affichage d'erreur si permission manquante ou autre problème
+  if (error) {
+    return (
+      <div className="p-6 bg-white rounded-[2.5rem] shadow-sm border border-gray-100">
+        <div className="text-center py-20">
+          <div className="text-4xl mb-4">🔒</div>
+          <p className="text-red-600 font-black uppercase text-sm mb-2">{error}</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="text-gray-400 hover:text-black text-xs font-bold uppercase"
+          >
+            Réessayer
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 bg-white rounded-[2.5rem] shadow-sm border border-gray-100">
@@ -117,7 +101,8 @@ const FinanceManager = () => {
         <button 
           onClick={fetchPayouts}
           disabled={loading}
-          className={`p-3 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors ${loading ? 'opacity-50' : ''}`}
+          className={`p-3 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+          aria-label="Rafraîchir la liste"
         >
           🔄
         </button>
@@ -161,7 +146,8 @@ const FinanceManager = () => {
                 
                 <button 
                   onClick={() => confirmPayment(p.order_id)}
-                  className="bg-black text-white px-8 py-4 rounded-2xl text-[10px] font-black hover:bg-green-600 active:scale-95 transition-all shadow-lg shadow-gray-200 uppercase tracking-widest"
+                  className="bg-black text-white px-8 py-4 rounded-2xl text-[10px] font-black hover:bg-green-600 active:scale-95 transition-all shadow-lg shadow-gray-200 uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={loading}
                 >
                   Valider Paiement ✅
                 </button>

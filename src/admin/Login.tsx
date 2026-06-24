@@ -1,9 +1,61 @@
+// Login.tsx - Version sécurisée et corrigée
 import React, { useState, FormEvent, ChangeEvent } from 'react';
-import { Lock, User, Eye, EyeOff } from 'lucide-react';
+import { Lock, User, Eye, EyeOff, AlertCircle } from 'lucide-react';
 
 interface LoginProps {
-  onLogin?: (data: any) => void;
+  onLogin?: (sessionData: any) => void;
 }
+
+// ✅ CLÉ UNIQUE pour toute la session (plus de dispersion)
+const SESSION_KEY = 'kemtchop_session';
+
+// ✅ Helper pour récupérer l'URL API (centralisé)
+const getApiBaseUrl = (): string => {
+  try {
+    // @ts-ignore - Vite injecte import.meta.env au runtime
+    const viteUrl = (import.meta as any).env?.VITE_API_URL;
+    if (viteUrl) return viteUrl.replace(/\/$/, '');
+  } catch (e) {
+    // Ignore si import.meta.env n'est pas disponible
+  }
+  // Fallback sécurisé : en prod, mieux vaut échouer que de pointer vers localhost
+  return import.meta.env?.MODE === 'development' 
+    ? 'http://localhost:8000' 
+    : 'https://kemtchop-backend-production.up.railway.app';
+};
+
+// ✅ Helper pour nettoyer TOUTES les anciennes clés de session
+const cleanupLegacyStorage = (): void => {
+  const legacyKeys = ['token', 'admin_token', 'user_permissions', 'admin_username', 'admin_role'];
+  legacyKeys.forEach(key => {
+    try {
+      localStorage.removeItem(key);
+      sessionStorage.removeItem(key);
+    } catch (e) {
+      console.warn(`⚠️ Impossible de supprimer ${key}:`, e);
+    }
+  });
+};
+
+// ✅ Helper pour sauvegarder la session de manière centralisée
+const saveSession = (sessionData: any): void => {
+  // Nettoyer d'abord les anciennes clés
+  cleanupLegacyStorage();
+  
+  // Sauvegarder dans UNE seule clé
+  localStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
+  
+  // Optionnel : aussi dans sessionStorage pour plus de sécurité (disparaît au fermeture onglet)
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
+};
+
+// ✅ Helper pour valider strictement un token JWT
+const isValidToken = (token: any): boolean => {
+  if (!token || typeof token !== 'string') return false;
+  // Un JWT valide a au moins 3 parties séparées par des points et une longueur minimale
+  const parts = token.split('.');
+  return parts.length === 3 && token.length > 50;
+};
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [username, setUsername] = useState<string>('');
@@ -12,75 +64,131 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
 
-  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
-  // Fallback vers localhost uniquement en dev local
-  const API_BASE = ((import.meta as any).env?.VITE_API_URL) || 'http://localhost:8000';
-
-  const normalizePermissions = (perms: string | string[] | null | undefined): string[] => {
-    if (!perms) return [];
-    if (Array.isArray(perms)) return perms;
-    if (typeof perms === 'string') {
-      return perms.split(',').map((p: string) => p.trim()).filter((p: string) => p.length > 0);
-    }
-    return [];
-  };
-
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
+    // ✅ Validation basique des inputs
+    if (!username.trim() || !password.trim()) {
+      setError('Veuillez remplir tous les champs');
+      setLoading(false);
+      return;
+    }
+
     try {
-      // ✅ Utiliser API_BASE au lieu de SERVER_IP hardcoded
-      console.log('🔍 [Login] Tentative de connexion à:', `${API_BASE}/auth/login`);
+      const apiBase = getApiBaseUrl();
+      const loginEndpoint = '/admin/login'; // ✅ Endpoint correct pour l'admin
       
-      const response = await fetch(`${API_BASE}/auth/login`, {
+      console.log('🔍 [Login] Connexion à:', `${apiBase}${loginEndpoint}`);
+      
+      const response = await fetch(`${apiBase}${loginEndpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: username.trim(), password }),
       });
+
+      // ✅ Gestion des erreurs HTTP
+      if (!response.ok) {
+        let errorDetail = 'Identifiants incorrects';
+        try {
+          const errorData = await response.json();
+          errorDetail = errorData.detail || errorData.message || errorDetail;
+        } catch (e) {
+          // Si la réponse n'est pas du JSON, utiliser le status
+          errorDetail = `Erreur ${response.status}: ${response.statusText}`;
+        }
+        throw new Error(errorDetail);
+      }
 
       const data = await response.json();
 
-      if (response.ok) {
-        const jwtToken = data.access_token || data.token;
-        
-        if (jwtToken) {
-          localStorage.setItem('token', jwtToken);
-          
-          const permissions = normalizePermissions(data.permissions);
-          
-          const sessionData = {
-            ...data,
-            permissions: permissions
-          };
-          localStorage.setItem('kemtchop_session', JSON.stringify(sessionData));
-          localStorage.setItem('user_permissions', JSON.stringify(permissions));
-          localStorage.setItem('admin_username', data.username || username);
-          localStorage.setItem('admin_role', data.role || 'admin');
-          
-          console.log('✅ [Login] Token sauvegardé');
-          console.log('✅ [Login] Permissions normalisées:', permissions);
-        } else {
-          console.error('❌ [Login] Aucun token trouvé dans la réponse:', data);
-          setError('Token manquant dans la réponse du serveur');
-        }
-        
-        if (onLogin) {
-          onLogin(data);
-        }
-      } else {
-        setError(data.detail || "Identifiants incorrects");
+      // ✅ VALIDATION CRITIQUE : Le token DOIT être présent et valide
+      const jwtToken = data.access_token || data.token;
+      
+      if (!isValidToken(jwtToken)) {
+        console.error('❌ [Login] Token invalide reçu:', {
+          hasToken: !!jwtToken,
+          tokenType: typeof jwtToken,
+          tokenLength: jwtToken?.length,
+          fullResponse: data
+        });
+        throw new Error('Token d\'authentification invalide. Veuillez réessayer ou contacter le support.');
       }
-    } catch (err) {
-      console.error('❌ Erreur login:', {
-        message: err instanceof Error ? err.message : String(err),
-        apiBase: API_BASE,
-        url: `${API_BASE}/auth/login`
+
+      // ✅ Normalisation des permissions (support string ou array)
+      const normalizePermissions = (perms: any): string[] => {
+        if (!perms) return [];
+        if (Array.isArray(perms)) return perms.filter((p: any) => typeof p === 'string');
+        if (typeof perms === 'string') {
+          return perms.split(',').map((p: string) => p.trim()).filter((p: string) => p.length > 0);
+        }
+        return [];
+      };
+
+      const permissions = normalizePermissions(data.permissions);
+
+      // ✅ Construction de la session CENTRALISÉE
+      const sessionData = {
+        token: jwtToken,
+        user_phone: data.phone || username, // Fallback si phone non présent
+        user_name: data.user_name || data.username || username,
+        role: data.role || 'admin',
+        permissions: permissions,
+        is_affiliate: data.is_affiliate || false,
+        affiliate_code: data.affiliate_code || null,
+        logged_at: new Date().toISOString(),
+        // Conserver tout autre champ utile retourné par l'API
+        ...Object.fromEntries(
+          Object.entries(data).filter(([key]) => 
+            !['access_token', 'token', 'permissions'].includes(key)
+          )
+        ),
+      };
+
+      // ✅ Sauvegarde centralisée dans UNE seule clé
+      saveSession(sessionData);
+
+      console.log('✅ [Login] Session sauvegardée:', {
+        user: sessionData.user_name,
+        role: sessionData.role,
+        permissionsCount: permissions.length,
+        tokenPreview: `${jwtToken.substring(0, 20)}...`
       });
-      setError("Impossible de contacter le serveur. Vérifie ta connexion.");
+
+      // ✅ Callback optionnel pour le parent
+      if (onLogin) {
+        onLogin(sessionData);
+      }
+
+    } catch (err: any) {
+      console.error('❌ [Login] Échec connexion:', {
+        message: err.message,
+        username,
+        apiBase: getApiBaseUrl()
+      });
+      
+      // Messages d'erreur utilisateur-friendly
+      const userMessage = err.message?.includes('Network') || err.message?.includes('Failed to fetch')
+        ? 'Impossible de contacter le serveur. Vérifie ta connexion internet.'
+        : err.message || 'Une erreur inattendue est survenue';
+      
+      setError(userMessage);
+      
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ✅ Fonction de logout centralisée (à exporter si besoin ailleurs)
+  const handleLogout = (): void => {
+    try {
+      localStorage.removeItem(SESSION_KEY);
+      sessionStorage.removeItem(SESSION_KEY);
+      cleanupLegacyStorage();
+      console.log('🔓 [Logout] Session nettoyée');
+    } catch (e) {
+      console.error('❌ [Logout] Erreur:', e);
     }
   };
 
@@ -110,6 +218,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               value={username}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setUsername(e.target.value)}
               required
+              disabled={loading}
+              autoComplete="username"
             />
           </div>
 
@@ -122,30 +232,59 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               value={password}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
               required
+              disabled={loading}
+              autoComplete="current-password"
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-4 top-4 text-gray-400 hover:text-black"
+              className="absolute right-4 top-4 text-gray-400 hover:text-black disabled:opacity-50"
+              disabled={loading}
+              aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
             >
               {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
             </button>
           </div>
 
           {error && (
-            <p className="text-red-600 text-[10px] font-black uppercase text-center bg-red-50 py-2 rounded-lg">
-              ⚠️ {error}
-            </p>
+            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl">
+              <AlertCircle className="text-red-600 flex-shrink-0" size={16} />
+              <p className="text-red-700 text-[11px] font-bold leading-tight">
+                {error}
+              </p>
+            </div>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-black text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-red-600 transition-all shadow-xl shadow-gray-200 active:scale-95 disabled:opacity-50"
+            className="w-full bg-black text-white py-5 rounded-2xl font-black uppercase tracking-widest hover:bg-red-600 transition-all shadow-xl shadow-gray-200 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            {loading ? "Vérification..." : "Se connecter"}
+            {loading ? (
+              <>
+                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Connexion...
+              </>
+            ) : (
+              "Se connecter"
+            )}
           </button>
         </form>
+
+        {/* Footer avec lien de secours */}
+        <div className="mt-8 text-center">
+          <p className="text-[10px] text-gray-400">
+            Problème d'accès ?{' '}
+            <a 
+              href="https://wa.me/237670040475?text=Bonjour,%20j'ai%20un%20problème%20pour%20accéder%20au%20panel%20admin%20KemTchop"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-red-600 font-bold hover:underline"
+            >
+              Contacter le support
+            </a>
+          </p>
+        </div>
       </div>
     </div>
   );

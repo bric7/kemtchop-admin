@@ -1,6 +1,8 @@
-// src/components/TeamManager.tsx
+// src/components/TeamManager.tsx - Version sécurisée (plus de logs de password)
 import React, { useState, useEffect } from "react";
 import { Search, ShieldAlert, User, RefreshCw, Trash2, Briefcase, PlusCircle, X } from "lucide-react";
+// ✅ IMPORT CRITIQUE : Utiliser le client API centralisé
+import { api, hasPermission, logout } from '@/services/api';
 
 // ============================================================
 // ✅ MODAL D'AJOUT/MODIFICATION (défini AVANT le composant principal)
@@ -37,7 +39,7 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
           customer_name: editingUser.customer_name || '',
           username: editingUser.username || '',
           phone: editingUser.phone || '',
-          password: '',
+          password: '', // ✅ Password vide en mode édition (on ne le change pas si vide)
           role: editingUser.role || 'manager',
           permissions: editingUser.permissions 
             ? (typeof editingUser.permissions === 'string' 
@@ -90,7 +92,7 @@ const TeamMemberModal: React.FC<TeamMemberModalProps> = ({
       await onSubmit(formData);
       onClose();
     } catch (err: any) {
-      console.error('❌ Erreur soumission:', err);
+      console.error('❌ Erreur soumission:', err.message);
       setError(err.message || 'Erreur lors de la sauvegarde');
     } finally {
       setSubmitting(false);
@@ -255,92 +257,57 @@ export default function TeamManager() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<any | null>(null);
 
-  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
-  const getApiBase = (): string => {
-    try {
-      // @ts-ignore - Vite injecte import.meta.env au runtime
-      const viteUrl = ((import.meta as any).env?.VITE_API_URL);
-      if (viteUrl) return viteUrl.replace(/\/$/, '');
-    } catch (e) {
-      // Ignore si import.meta.env n'est pas disponible au build
+  // ✅ Vérification des permissions au montage
+  useEffect(() => {
+    if (!hasPermission('manage_users')) {
+      setLoading(false);
+      return;
     }
-    return 'http://localhost:8000';
-  };
-
-  // ✅ Helper pour extraire le token JWT
-  const getAuthToken = (): string | null => {
-    try {
-      const sessionRaw = localStorage.getItem('kemtchop_session');
-      if (!sessionRaw) return null;
-      const session = JSON.parse(sessionRaw);
-      return session.access_token || session.token || null;
-    } catch (e) {
-      console.error('❌ Erreur parse session:', e);
-      return null;
-    }
-  };
-
-  const getSession = () => {
-    try {
-      const raw = localStorage.getItem('kemtchop_session');
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) {
-      console.error('❌ Erreur parse session:', e);
-      return null;
-    }
-  };
-
-  // ✅ Fonction pour créer/modifier un utilisateur via l'API backend
-  const handleSubmitUser = async (data: any) => {
-    const token = getAuthToken();
-    if (!token) throw new Error('Session invalide');
-
-    const apiBase = getApiBase();
-    const url = editingUser 
-      ? `${apiBase}/admin/users/${editingUser.id}`
-      : `${apiBase}/admin/users`;
-    
-    const method = editingUser ? 'PUT' : 'POST';
-    
-    console.log(`📡 ${method} ${url}`, data);
-    
-    const response = await fetch(url, {
-      method,
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(data)
-    });
-
-    const result = await response.json();
-    console.log(`📥 Réponse ${response.status}:`, result);
-    
-    if (!response.ok) {
-      throw new Error(result.detail || `Erreur ${response.status}: ${response.statusText}`);
-    }
-    
-    alert(`✅ ${editingUser ? 'Modifications' : 'Compte'} enregistré avec succès !`);
     fetchTeam();
+  }, []);
+
+  // ✅ Fonction pour créer/modifier un utilisateur via l'API centralisée
+  const handleSubmitUser = async (data: any) => {
+    try {
+      // ✅ Ne PAS logger le password ! Loguer seulement les champs non sensibles
+      const safeLogData = { ...data };
+      if (safeLogData.password) {
+        safeLogData.password = '***'; // ✅ Masquer le password dans les logs
+      }
+      console.log(`📡 ${editingUser ? 'PUT' : 'POST'} /admin/users`, {
+        username: safeLogData.username,
+        role: safeLogData.role,
+        permissionsCount: safeLogData.permissions?.length || 0
+      });
+      
+      const url = editingUser 
+        ? `/admin/users/${editingUser.id}`
+        : '/admin/users';
+      
+      const method = editingUser ? 'put' : 'post';
+      
+      // ✅ Utiliser le client API centralisé (gère token + URL automatiquement)
+      const result = await api[method](url, data, true);
+      
+      console.log(`✅ ${editingUser ? 'Modifications' : 'Compte'} enregistré:`, {
+        id: result.id || result.user_id,
+        username: result.username
+      });
+      
+      alert(`✅ ${editingUser ? 'Modifications' : 'Compte'} enregistré avec succès !`);
+      fetchTeam();
+    } catch (error: any) {
+      console.error('❌ Erreur sauvegarde utilisateur:', error.message);
+      throw error; // Re-throw pour que le modal puisse afficher l'erreur
+    }
   };
 
   // ✅ Charger UNIQUEMENT les membres d'équipe (accès admin panel)
   const fetchTeam = async () => {
-    const token = getAuthToken();
-    if (!token) { setLoading(false); return; }
-
+    setLoading(true);
     try {
-      const apiBase = getApiBase();
-      const response = await fetch(`${apiBase}/admin/users`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response.ok) throw new Error(`Erreur HTTP: ${response.status}`);
-      
-      const data = await response.json();
+      // ✅ Utiliser le client API centralisé
+      const data = await api.get('/admin/users', true);
       
       // ✅ FILTRAGE CRITIQUE : ne garder que l'équipe interne
       const teamMembers = (Array.isArray(data) ? data : []).filter((u: any) => 
@@ -349,56 +316,67 @@ export default function TeamManager() {
       );
       
       setTeam(teamMembers);
-    } catch (error) {
-      console.error("❌ Erreur chargement équipe:", error);
+    } catch (error: any) {
+      console.error("❌ Erreur chargement équipe:", error.message);
+      if (error.message?.includes('Authentification requise')) {
+        logout();
+        // Optionnel : redirection
+        // window.location.href = '/admin/login';
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { fetchTeam(); }, []);
-
   // ✅ Vérifier si l'utilisateur actuel peut supprimer un membre d'équipe
   const canDeleteUser = (targetUser: any): boolean => {
-    const session = getSession();
-    if (!session) return false;
+    const sessionRaw = localStorage.getItem('kemtchop_session');
+    if (!sessionRaw) return false;
     
-    if (targetUser.username === session.username) return false;
-    if (targetUser.role === 'admin' && session.role !== 'admin') return false;
-    
-    const perms = Array.isArray(session.permissions) 
-      ? session.permissions 
-      : (typeof session.permissions === 'string' ? session.permissions.split(',') : []);
-    
-    return perms.includes('manage_users') || perms.includes('delete_users') || session.role === 'admin';
+    try {
+      const session = JSON.parse(sessionRaw);
+      if (targetUser.username === session.username) return false;
+      if (targetUser.role === 'admin' && session.role !== 'admin') return false;
+      
+      const perms = Array.isArray(session.permissions) 
+        ? session.permissions 
+        : (typeof session.permissions === 'string' ? session.permissions.split(',') : []);
+      
+      return perms.includes('manage_users') || perms.includes('delete_users') || session.role === 'admin';
+    } catch {
+      return false;
+    }
   };
 
   const handleDelete = async (userId: number, targetUsername: string, targetRole: string) => {
-    const token = getAuthToken();
-    const session = getSession();
-    if (!token || !session) { alert('⚠️ Session expirée'); return; }
+    const sessionRaw = localStorage.getItem('kemtchop_session');
+    if (!sessionRaw) { alert('⚠️ Session expirée'); return; }
     
-    if (targetUsername === session.username) { alert("🚫 Tu ne peux pas supprimer ton propre compte !"); return; }
-    if (targetRole === 'admin' && session.role !== 'admin') { alert("🚫 Seul un admin peut supprimer un autre admin !"); return; }
+    try {
+      const session = JSON.parse(sessionRaw);
+      if (targetUsername === session.username) { alert("🚫 Tu ne peux pas supprimer ton propre compte !"); return; }
+      if (targetRole === 'admin' && session.role !== 'admin') { alert("🚫 Seul un admin peut supprimer un autre admin !"); return; }
+    } catch {
+      alert('⚠️ Session invalide');
+      return;
+    }
     
     if (!window.confirm(`⚠️ Supprimer l'accès de "${targetUsername}" ?\n\nCette action est irréversible.`)) return;
 
     setDeletingId(userId);
     try {
-      const apiBase = getApiBase();
-      const response = await fetch(`${apiBase}/admin/users/${userId}`, {
-        method: "DELETE",
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-      });
-      
-      if (response.ok) { 
-        alert("✅ Accès révoqué"); 
-        fetchTeam(); 
-      } else { 
-        alert("❌ Erreur lors de la suppression"); 
+      // ✅ Utiliser le client API centralisé pour DELETE
+      await api.delete(`/admin/users/${userId}`, true);
+      alert("✅ Accès révoqué"); 
+      fetchTeam(); 
+    } catch (error: any) {
+      console.error("❌ Erreur suppression:", error.message);
+      if (error.message?.includes('Authentification requise')) {
+        alert('⚠️ Session expirée. Reconnecte-toi.');
+        logout();
+      } else {
+        alert("❌ Erreur lors de la suppression: " + error.message);
       }
-    } catch { 
-      alert("❌ Erreur de connexion"); 
     } finally { 
       setDeletingId(null); 
     }
@@ -409,21 +387,18 @@ export default function TeamManager() {
   };
 
   const handleSendSetupLink = async (phone: string, userName: string) => {
-    const token = getAuthToken();
-    if (!token) return;
-    
     try {
-      const apiBase = getApiBase();
-      const response = await fetch(`${apiBase}/admin/generate-reset-link/${phone}`, {
-        method: "POST",
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
-      });
-      const data = await response.json();
-      if (response.ok) {
-        const message = `Bonjour ${userName}, voici votre lien pour configurer votre accès Kemtchop : ${data.link}`;
+      // ✅ Utiliser le client API centralisé
+      const result = await api.post(`/admin/generate-reset-link/${phone}`, {}, true);
+      
+      if (result?.link) {
+        const message = `Bonjour ${userName}, voici votre lien pour configurer votre accès Kemtchop : ${result.link}`;
         window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
       }
-    } catch (e) { console.error("Erreur reset link:", e); }
+    } catch (e: any) { 
+      console.error("❌ Erreur reset link:", e.message);
+      alert("Impossible d'envoyer le lien de réinitialisation");
+    }
   };
 
   const filteredTeam = team.filter((u: any) =>
@@ -442,6 +417,21 @@ export default function TeamManager() {
     };
     return styles[role] || 'bg-gray-100 text-gray-600';
   };
+
+  // ✅ Affichage si pas de permission
+  if (!hasPermission('manage_users')) {
+    return (
+      <div className="p-8 text-center">
+        <div className="text-6xl mb-4">🔒</div>
+        <h2 className="text-xl font-black text-gray-900 uppercase italic mb-2">
+          Accès refusé
+        </h2>
+        <p className="text-gray-500 font-bold">
+          Vous n'avez pas la permission <span className="text-red-600">"manage_users"</span> pour gérer l'équipe.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -488,7 +478,7 @@ export default function TeamManager() {
             <tbody className="divide-y divide-gray-50">
               {filteredTeam.map((user: any) => {
                 const canDelete = canDeleteUser(user);
-                const isSelf = user.username === getSession()?.username;
+                const isSelf = user.username === (JSON.parse(localStorage.getItem('kemtchop_session') || '{}')?.username);
                 
                 return (
                   <tr key={user.id} className="hover:bg-blue-50/30 transition">
