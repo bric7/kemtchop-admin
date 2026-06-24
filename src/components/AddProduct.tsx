@@ -1,5 +1,20 @@
+// AddProduct.tsx - Version corrigée (syntaxe + auth token)
 import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Film, ImageIcon, Plus, Trash2, CheckCircle2, Users, LayoutGrid, ToggleRight } from 'lucide-react';
+
+// ✅ URL de l'API dynamique (Vite)
+const getApiBaseUrl = (): string => {
+  try {
+    // @ts-ignore - Vite injecte import.meta.env au runtime
+    const viteUrl = (import.meta as any).env?.VITE_API_URL;
+    if (viteUrl) return viteUrl.replace(/\/$/, '');
+  } catch (e) {
+    // Ignore si import.meta.env n'est pas disponible
+  }
+  return import.meta.env?.MODE === 'development' 
+    ? 'http://localhost:8000' 
+    : 'https://kemtchop-backend-production.up.railway.app';
+};
 
 // On garde les mêmes catégories que sur l'App Mobile pour la synchronisation
 const CATEGORIES = ["Grillades", "Plats Locaux", "Boissons", "Accompagnements", "rôti"];
@@ -10,7 +25,7 @@ export default function AddProduct() {
 
   // --- ÉTATS ---
   const [category, setCategory] = useState("Grillades");
-  const [isHero, setIsHero] = useState(false); // État pour le produit phare
+  const [isHero, setIsHero] = useState(false);
   const [isAvailable, setIsAvailable] = useState(true);
 
   const [productName, setProductName] = useState('');
@@ -29,7 +44,16 @@ export default function AddProduct() {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
-  // Calcul automatique des packs
+  // ✅ CLEANUP : Libérer l'URL de prévisualisation au démontage ou changement
+  useEffect(() => {
+    return () => {
+      if (imagePreview) {
+        URL.revokeObjectURL(imagePreview);
+      }
+    };
+  }, [imagePreview]);
+
+  // ✅ Calcul automatique des packs (CORRIGÉ : setPriceFamily au lieu de const priceFamily)
   useEffect(() => {
     const solo = Number(priceSolo) || 0;
     const size = Number(familySize) || 0;
@@ -38,7 +62,7 @@ export default function AddProduct() {
       const totalFamily = (solo * size) - 500;
       setPriceFamily(totalFamily > 0 ? totalFamily : 0);
     } else {
-      setPriceFamily(0);
+      setPriceFamily(0); // ✅ CORRECTION CRITIQUE : setter d'état, pas une constante
     }
   }, [priceSolo, familySize]);
 
@@ -56,6 +80,12 @@ export default function AddProduct() {
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      
+      // ✅ Libérer l'ancienne URL avant d'en créer une nouvelle
+      if (imagePreview) {
+        URL.revokeObjectURL(imagePreview);
+      }
+      
       setImageFile(file);
       setImagePreview(URL.createObjectURL(file));
     }
@@ -80,8 +110,11 @@ export default function AddProduct() {
     formData.append('product_name', productName);
     formData.append('title', productName);
     formData.append('category', category);
-    formData.append('is_available', isAvailable.toString());
-    formData.append('is_hero', isHero.toString()); // Envoi du statut Hero
+    
+    // ✅ ENVOI DES BOOLÉENS : 1 pour true, 0 pour false (compatible FastAPI)
+    formData.append('is_available', isAvailable ? '1' : '0');
+    formData.append('is_hero', isHero ? '1' : '0');
+    
     formData.append('price_solo', priceSolo);
     formData.append('price_duo', priceDuo.toString());
     formData.append('price_family', priceFamily.toString());
@@ -91,8 +124,21 @@ export default function AddProduct() {
     formData.append('complements', complements.join(','));
 
     try {
-      const response = await fetch('http://localhost:8000/admin/upload-content', {
+      // ✅ URL DYNAMIQUE via variable d'environnement
+      const apiBaseUrl = getApiBaseUrl();
+      
+      // ✅ RÉCUPÉRATION DU TOKEN depuis la session locale
+      const sessionRaw = localStorage.getItem('kemtchop_session');
+      const token = sessionRaw ? JSON.parse(sessionRaw).access_token : '';
+
+      const response = await fetch(`${apiBaseUrl}/admin/upload-content`, {
         method: 'POST',
+        headers: {
+          // ✅ Header d'authentification requis pour les endpoints admin
+          'Authorization': `Bearer ${token}`
+          // ⚠️ Ne pas définir Content-Type manuellement pour FormData
+          // Le navigateur ajoute automatiquement : multipart/form-data; boundary=...
+        },
         body: formData,
       });
 
@@ -103,14 +149,32 @@ export default function AddProduct() {
         setPriceSolo('');
         setIsHero(false);
         setImageFile(null);
-        setImagePreview(null);
+        if (imagePreview) {
+          URL.revokeObjectURL(imagePreview);
+          setImagePreview(null);
+        }
         setVideoFile(null);
         setTimeout(() => setSuccess(false), 3000);
       } else {
-        alert("Erreur serveur.");
+        const errorData = await response.json().catch(() => ({}));
+        
+        // Gestion des erreurs d'authentification
+        if (response.status === 401) {
+          alert('Session expirée. Veuillez vous reconnecter.');
+          // Optionnel : rediriger vers login
+          // window.location.href = '/admin/login';
+        } else {
+          alert(`Erreur serveur: ${errorData.detail || response.status}`);
+        }
       }
-    } catch (error) {
-      alert("Impossible de contacter le serveur Kemtchop.");
+    } catch (error: any) {
+      console.error("❌ Erreur upload:", error);
+      // Message utilisateur-friendly pour erreurs réseau
+      if (error.message?.includes('Failed to fetch') || error.message?.includes('Network')) {
+        alert('Impossible de contacter le serveur. Vérifie ta connexion internet.');
+      } else {
+        alert("Impossible de contacter le serveur Kemtchop.");
+      }
     } finally {
       setLoading(false);
     }

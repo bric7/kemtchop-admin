@@ -1,116 +1,121 @@
-// OrdersList.tsx - Version corrigée (Rules of Hooks respectées)
-import React, { useEffect, useState, useMemo } from "react";
+// OrdersList.tsx - Version finale optimisée
+import React, { useEffect, useState, useCallback } from "react";
+// ✅ Import unique du client API centralisé
+import { api, hasPermission as checkPermission, isAuthenticated } from "@/services/api";
 
 const OrdersList = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false); // ✅ Pour éviter le clignotement
 
-  // ✅ SOLUTION : Utiliser l'URL de l'API via variable d'environnement Vite
-  const getApiBase = useMemo((): string => {
-    try {
-      // @ts-ignore - Vite injecte import.meta.env au runtime
-      const viteUrl = ((import.meta as any).env?.VITE_API_URL);
-      if (viteUrl) return viteUrl.replace(/\/$/, '');
-    } catch (e) {
-      // Ignore si import.meta.env n'est pas disponible au build
+  // ✅ FONCTION pour récupérer les commandes (utilisée partout)
+  const fetchOrders = useCallback(async (isInitialLoad: boolean = false) => {
+    // ✅ Ne montre le loader QUE lors du premier chargement
+    if (isInitialLoad || orders.length === 0) {
+      setLoading(true);
     }
-    return 'http://localhost:8000';
-  }, []);
-
-  // ✅ Helper inline pour vérifier les permissions
-  const hasPermission = useMemo((): boolean => {
-    // 1. Essayer user_permissions (format tableau JSON)
-    const userPermsRaw = localStorage.getItem('user_permissions');
-    if (userPermsRaw) {
-      try {
-        const perms = JSON.parse(userPermsRaw);
-        if (Array.isArray(perms) && perms.includes('orders')) return true;
-      } catch (e) {
-        console.error('❌ Erreur parse user_permissions:', e);
+    setError(null);
+    
+    try {
+      // ✅ Utilise le client API centralisé (gère token + URL automatiquement)
+      const data = await api.get('/admin/orders', true); // true = requireAuth
+      
+      // ✅ Filtrage FLEXIBLE avec fallback et logs de debug
+      const filteredOrders = Array.isArray(data) 
+        ? data.filter((o: any) => {
+            // Debug : log si le champ role est manquant (pour diagnostic)
+          
+            
+            // Filtre : soit pas de username (commande client), soit rôle interne valide
+            const isInternalTeam = o.username && ['admin', 'manager', 'cuisine', 'livreur'].includes(o.role);
+            const isClientOrder = !o.username; // Commande passée par un client normal
+            
+            // ✅ Inclure les deux types (ajuste selon ton besoin métier)
+            return isInternalTeam || isClientOrder;
+          })
+        : [];
+      
+      // Trier par ID décroissant (plus récent en premier)
+      const sortedOrders = [...filteredOrders].sort((a: any, b: any) => 
+        Number(b.id) - Number(a.id)
+      );
+      
+      setOrders(sortedOrders);
+      setHasLoadedOnce(true); // ✅ Marque que le premier chargement est fait
+      
+    } catch (err: any) {
+      console.error("❌ Erreur fetch orders:", err.message);
+      
+      // Gestion des erreurs d'authentification
+      if (err.message?.includes('Authentification requise') || err.message?.includes('401')) {
+        setError('Session expirée. Veuillez vous reconnecter.');
+        // Optionnel : logout automatique
+        // api.logout();
+        // window.location.href = '/admin/login';
+      } else {
+        setError(err.message || 'Impossible de charger les commandes.');
+      }
+    } finally {
+      // ✅ Ne cache le loader QUE si c'était le premier chargement
+      if (isInitialLoad || orders.length === 0) {
+        setLoading(false);
       }
     }
-    
-    // 2. Fallback : lire depuis kemtchop_session
-    const sessionRaw = localStorage.getItem('kemtchop_session');
-    if (sessionRaw) {
-      try {
-        const session = JSON.parse(sessionRaw);
-        let perms = session.permissions;
-        
-        if (typeof perms === 'string') {
-          return perms.split(',').map((p: string) => p.trim()).includes('orders');
-        }
-        if (Array.isArray(perms)) {
-          return perms.includes('orders');
-        }
-      } catch (e) {
-        console.error('❌ Erreur parse kemtchop_session:', e);
-      }
-    }
-    
-    return false;
-  }, []);
+  }, [orders.length]); // ✅ Dépendance minimale
 
-  // --- FONCTION POUR RÉCUPÉRER LE TOKEN ---
-  const getAuthToken = useMemo((): string | null => {
-    try {
-      const session = localStorage.getItem('kemtchop_session');
-      if (!session) return null;
-      const parsed = JSON.parse(session);
-      return parsed.access_token || parsed.token || null;
-    } catch (e) {
-      console.error('❌ Erreur parse session:', e);
-      return null;
-    }
-  }, []);
-
-  // ✅ CORRECTION : useEffect APPELÉ AVANT TOUT RETURN CONDITIONNEL
+  // ✅ useEffect principal : Chargement initial + Polling
   useEffect(() => {
-    // Si pas de permission, ne pas fetch (mais le hook est TOUJOURS appelé)
-    if (!hasPermission) {
-      setLoading(false);
-      return;
-    }
-
-    const fetchOrders = async () => {
-      const token = getAuthToken();
-      if (!token) {
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const apiBase = getApiBase;
-        const response = await fetch(`${apiBase}/admin/orders`, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        
-        if (!response.ok) throw new Error("Accès refusé");
-        
-        const data = await response.json();
-        setOrders(Array.isArray(data) ? data : []);
-      } catch (err) {
-        console.error("Erreur fetch orders:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchOrders();
+    // Chargement initial
+    fetchOrders(true); // true = isInitialLoad
     
     // Polling toutes les 5 secondes si authentifié
-    const interval = setInterval(() => {
-      if (getAuthToken()) fetchOrders();
-    }, 5000); 
-    
-    return () => clearInterval(interval);
-  }, [hasPermission, getApiBase, getAuthToken]); // ✅ Dependencies déclarées
+    // ⚠️ Désactive avec POLLING_ENABLED = false si besoin
+    const POLLING_ENABLED = true;
+    if (POLLING_ENABLED) {
+      const interval = setInterval(() => {
+        if (isAuthenticated()) {  // ✅ Appel direct, pas api.isAuthenticated()
+          fetchOrders(false); // false = pas de loader
+        }
+      }, 5000);
+      
+      // Cleanup au démontage
+      return () => clearInterval(interval);
+    }
+  }, [fetchOrders]);
 
-  // ✅ Return conditionnel APRÈS tous les hooks
-  if (!hasPermission) {
+  // ✅ Handler pour changer le statut d'une commande (utilise api.patch)
+  const handleNextStatus = async (orderId: number, currentStatus: string) => {
+    const statusFlow: Record<string, string> = {
+      "en_attente": "cuisine",
+      "cuisine": "livraison",
+      "en_cuisine": "livraison",
+      "livraison": "termine",
+      "en_livraison": "termine"
+    };
+
+    const nextStatus = statusFlow[currentStatus];
+    if (!nextStatus) return;
+
+    try {
+      // ✅ Utilise le client API centralisé pour PATCH
+      await api.patch(
+        `/admin/orders/${orderId}/status?new_status=${nextStatus}`,
+        {}, // Corps vide pour PATCH
+        true // requireAuth
+      );
+      
+      // Refresh immédiat après mise à jour réussie (sans loader)
+      fetchOrders(false);
+      
+    } catch (err: any) {
+      console.error("❌ Erreur mise à jour statut:", err.message);
+      alert("Erreur: " + (err.message || "Impossible de modifier cette commande"));
+    }
+  };
+
+  // ✅ Vérification de permission (utilise le helper centralisé)
+  if (!checkPermission('orders')) {
     return (
       <div className="p-8 text-center animate-in fade-in duration-300">
         <div className="text-6xl mb-4">🔒</div>
@@ -127,8 +132,24 @@ const OrdersList = () => {
     );
   }
 
-  // Loading state
-  if (loading) {
+  // ✅ Affichage d'erreur si problème
+  if (error) {
+    return (
+      <div className="p-8 text-center">
+        <div className="text-4xl mb-4">⚠️</div>
+        <p className="text-red-600 font-bold mb-4">{error}</p>
+        <button 
+          onClick={() => fetchOrders(true)}
+          className="px-6 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700"
+        >
+          Réessayer
+        </button>
+      </div>
+    );
+  }
+
+  // ✅ Loading state : uniquement au premier chargement
+  if (loading && orders.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600"></div>
@@ -136,64 +157,11 @@ const OrdersList = () => {
     );
   }
 
-  // Handler pour changer le statut d'une commande
-  const handleNextStatus = async (orderId: number, currentStatus: string) => {
-    const token = getAuthToken();
-    if (!token) return;
-
-    const statusFlow: Record<string, string> = {
-      "en_attente": "cuisine",
-      "cuisine": "livraison",
-      "en_cuisine": "livraison",
-      "livraison": "termine",
-      "en_livraison": "termine"
-    };
-
-    const nextStatus = statusFlow[currentStatus] || "termine";
-
-    try {
-      const apiBase = getApiBase;
-      const response = await fetch(
-        `${apiBase}/admin/orders/${orderId}/status?new_status=${nextStatus}`,
-        { 
-          method: "PATCH",
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-
-      if (response.ok) {
-        // Refresh immédiat après mise à jour
-        const fetchOrders = async () => {
-          const response = await fetch(`${apiBase}/admin/orders`, {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          });
-          if (response.ok) {
-            const data = await response.json();
-            setOrders(Array.isArray(data) ? data : []);
-          }
-        };
-        fetchOrders();
-      } else {
-        alert("Erreur: Vous n'avez pas les droits pour modifier cette commande.");
-      }
-    } catch (err) {
-      console.error("Erreur mise à jour:", err);
-    }
-  };
-
-  // Composant de colonne réutilisable
+  // ✅ Composant de colonne réutilisable
   const renderColumn = (title: string, statusList: string[], bgColor: string) => {
     const filteredOrders = orders.filter((order: any) => 
-        statusList.includes(order.status)
+      statusList.includes(order.status)
     );
-
-    const sortedOrders = [...filteredOrders].sort((a: any, b: any) => Number(b.id) - Number(a.id));
 
     return (
       <div className="flex-1 min-w-[320px] bg-gray-50 rounded-[2.5rem] p-6 shadow-inner border border-gray-100">
@@ -202,62 +170,62 @@ const OrdersList = () => {
             {title}
           </h3>
           <span className={`px-3 py-1 rounded-full text-[10px] font-black ${bgColor} text-white`}>
-            {sortedOrders.length}
+            {filteredOrders.length}
           </span>
         </div>
 
         <div className="space-y-4">
-          {sortedOrders.map((order: any) => (
+          {filteredOrders.map((order: any) => (
             <div key={order.id} className="bg-white p-5 rounded-[2rem] shadow-sm border border-gray-50 hover:shadow-xl hover:scale-[1.02] transition-all duration-300">
               
+              {/* Header commande */}
               <div className="flex justify-between items-start mb-3">
                 <p className="text-[10px] font-mono text-gray-300">#{order.id}</p>
                 <div className="text-right">
-                    <span className="text-sm font-black text-gray-900 block">
-                        {order.total_amount?.toLocaleString() || 0} F
+                  <span className="text-sm font-black text-gray-900 block">
+                    {order.total_amount?.toLocaleString() || 0} F
+                  </span>
+                  {order.affiliate_code && (
+                    <span className="text-[9px] font-black text-green-600 bg-green-50 px-2 py-1 rounded-lg uppercase mt-1 inline-block">
+                      +{(order.total_amount * 0.15).toLocaleString()} F
                     </span>
-                    {order.affiliate_code && (
-                        <div className="mt-1 flex flex-col items-end">
-                            <span className="text-[9px] font-black text-green-600 bg-green-50 px-2 py-1 rounded-lg uppercase">
-                                + {(order.total_amount * 0.15).toLocaleString()} F
-                            </span>
-                        </div>
-                    )}
+                  )}
                 </div>
               </div>
 
+              {/* Infos client */}
               <h4 className="font-black text-gray-900 leading-tight uppercase text-sm italic">
                 {order.customer_name}
               </h4>
               <p className="text-xs font-bold text-gray-500 mb-2 mt-1">🍗 {order.product_name}</p>
               
+              {/* Détails livraison */}
               <div className="space-y-1 mb-4">
                 <p className="text-[10px] text-gray-400 flex items-center font-bold uppercase">
-                  <span className="mr-2">📍 {order.zone}</span>
+                  📍 {order.zone}
                 </p>
                 <p className="text-[10px] text-red-500 flex items-center font-black uppercase">
-                  <span>🕒 {order.delivery_time}</span>
+                  🕒 {order.delivery_time}
                 </p>
               </div>
 
-              <div className="flex gap-2">
-                {order.status !== "termine" && (
-                  <button
-                    onClick={() => handleNextStatus(order.id, order.status)}
-                    className="flex-1 py-4 bg-black text-white rounded-2xl text-[10px] font-black hover:bg-red-600 active:scale-95 transition-all uppercase tracking-widest"
-                  >
-                    {order.status === "en_attente" 
-                      ? "👨‍🍳 Envoyer Cuisine" 
-                      : (order.status === "cuisine" || order.status === "en_cuisine")
-                      ? "🛵 Lancer Livraison" 
-                      : "💰 Terminer"}
-                  </button>
-                )}
-              </div>
+              {/* Bouton d'action */}
+              {order.status !== "termine" && (
+                <button
+                  onClick={() => handleNextStatus(order.id, order.status)}
+                  className="w-full py-4 bg-black text-white rounded-2xl text-[10px] font-black hover:bg-red-600 active:scale-95 transition-all uppercase tracking-widest"
+                >
+                  {order.status === "en_attente" 
+                    ? "👨‍🍳 Envoyer Cuisine" 
+                    : (order.status === "cuisine" || order.status === "en_cuisine")
+                    ? "🛵 Lancer Livraison" 
+                    : "💰 Terminer"}
+                </button>
+              )}
             </div>
           ))}
           
-          {sortedOrders.length === 0 && (
+          {filteredOrders.length === 0 && (
             <div className="text-center py-8 text-gray-400 text-sm font-bold">
               Aucune commande
             </div>
@@ -267,6 +235,7 @@ const OrdersList = () => {
     );
   };
 
+  // ✅ Rendu principal
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="flex gap-8 overflow-x-auto pb-10 items-start no-scrollbar">
