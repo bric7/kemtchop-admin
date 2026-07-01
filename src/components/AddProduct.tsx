@@ -1,16 +1,19 @@
-// AddProduct.tsx - Version corrigée (syntaxe + auth token)
+// AddProduct.tsx - Version avec extraction de token universelle
 import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Film, ImageIcon, Plus, Trash2, CheckCircle2, Users, LayoutGrid, ToggleRight } from 'lucide-react';
 
-// ✅ URL de l'API dynamique (Vite)
+// ✅ URL de l'API dynamique (Vite) - avec fallback sécurisé
 const getApiBaseUrl = (): string => {
   try {
     // @ts-ignore - Vite injecte import.meta.env au runtime
     const viteUrl = (import.meta as any).env?.VITE_API_URL;
-    if (viteUrl) return viteUrl.replace(/\/$/, '');
+    if (viteUrl && viteUrl.trim()) {
+      return viteUrl.replace(/\/$/, ''); // Remove trailing slash
+    }
   } catch (e) {
     // Ignore si import.meta.env n'est pas disponible
   }
+  // Fallback sécurisé : en prod, mieux vaut échouer que de pointer vers localhost
   return import.meta.env?.MODE === 'development' 
     ? 'http://localhost:8000' 
     : 'https://kemtchop-backend-production.up.railway.app';
@@ -99,7 +102,9 @@ export default function AddProduct() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!productName || !imageFile || !priceSolo) {
+    
+    // ✅ Validation des champs obligatoires
+    if (!productName.trim() || !imageFile || !priceSolo) {
       alert("Erreur : Le nom, le prix solo et l'image sont obligatoires !");
       return;
     }
@@ -107,8 +112,8 @@ export default function AddProduct() {
     setLoading(true);
     const formData = new FormData();
 
-    formData.append('product_name', productName);
-    formData.append('title', productName);
+    formData.append('product_name', productName.trim());
+    formData.append('title', productName.trim());
     formData.append('category', category);
     
     // ✅ ENVOI DES BOOLÉENS : 1 pour true, 0 pour false (compatible FastAPI)
@@ -124,56 +129,109 @@ export default function AddProduct() {
     formData.append('complements', complements.join(','));
 
     try {
-      // ✅ URL DYNAMIQUE via variable d'environnement
       const apiBaseUrl = getApiBaseUrl();
       
-      // ✅ RÉCUPÉRATION DU TOKEN depuis la session locale
+      // ✅ RÉCUPÉRATION ET VALIDATION DU TOKEN (VERSION UNIVERSELLE)
       const sessionRaw = localStorage.getItem('kemtchop_session');
-      const token = sessionRaw ? JSON.parse(sessionRaw).access_token : '';
+      if (!sessionRaw) {
+        throw new Error('Session non trouvée. Veuillez vous reconnecter.');
+      }
+
+      const session = JSON.parse(sessionRaw);
+      console.log("🔍 [AddProduct] Contenu brut de la session récupérée :", session);
+
+      // On teste TOUTES les clés possibles que ton Login a pu enregistrer
+      const token = session.access_token || 
+                    session.token || 
+                    session.accessToken || 
+                    session.data?.access_token ||
+                    (typeof session === 'string' ? session : ''); // Au cas où le token a été stocké brut
+
+      if (!token || token === 'undefined' || token === 'null') {
+        // 🚨 Si on arrive ici, on affiche le contenu de l'objet pour comprendre ce que le login a stocké
+        console.error("❌ [AddProduct] Token introuvable. Session stockée :", session);
+        alert(`Erreur : Aucun token trouvé dans la session. Contenu stocké : ${JSON.stringify(session)}`);
+        throw new Error('Token introuvable. Problème au niveau du stockage du Login.');
+      }
+
+      // ✅ Debug log pour troubleshooting
+      console.log('🔍 [Upload Debug]', {
+        apiBaseUrl,
+        tokenPreview: `${token.substring(0, 30)}...`,
+        formDataKeys: Array.from(formData.keys()),
+        imageFileName: imageFile?.name,
+        videoFileName: videoFile?.name,
+      });
 
       const response = await fetch(`${apiBaseUrl}/admin/upload-content`, {
         method: 'POST',
         headers: {
           // ✅ Header d'authentification requis pour les endpoints admin
-          'Authorization': `Bearer ${token}`
-          // ⚠️ Ne pas définir Content-Type manuellement pour FormData
+          'Authorization': `Bearer ${token}`,
+          // ⚠️ NE PAS définir Content-Type manuellement pour FormData
           // Le navigateur ajoute automatiquement : multipart/form-data; boundary=...
         },
         body: formData,
       });
 
+      // ✅ Gestion détaillée des réponses
       if (response.ok) {
+        const result = await response.json().catch(() => ({}));
+        console.log('✅ Upload réussi:', result);
+        
         setSuccess(true);
-        // Reset du formulaire
+        
+        // Reset complet du formulaire
         setProductName('');
         setPriceSolo('');
         setIsHero(false);
-        setImageFile(null);
+        
+        // Cleanup image preview
         if (imagePreview) {
           URL.revokeObjectURL(imagePreview);
           setImagePreview(null);
         }
+        setImageFile(null);
         setVideoFile(null);
-        setTimeout(() => setSuccess(false), 3000);
-      } else {
-        const errorData = await response.json().catch(() => ({}));
         
-        // Gestion des erreurs d'authentification
+        setTimeout(() => setSuccess(false), 3000);
+        
+      } else {
+        // ✅ Gestion détaillée des erreurs HTTP
+        let errorDetail = `Erreur serveur: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorDetail = errorData.detail || errorData.message || errorData.error || errorDetail;
+        } catch (e) {
+          // Si la réponse n'est pas du JSON, utiliser le status text
+          errorDetail = `${response.status} ${response.statusText}`;
+        }
+        
+        console.error('❌ Erreur upload:', { status: response.status, detail: errorDetail });
+        
+        // Messages d'erreur contextuels
         if (response.status === 401) {
           alert('Session expirée. Veuillez vous reconnecter.');
-          // Optionnel : rediriger vers login
-          // window.location.href = '/admin/login';
+        } else if (response.status === 403) {
+          alert('Accès refusé. Permissions insuffisantes.');
+        } else if (response.status === 413) {
+          alert('Fichier trop volumineux. Veuillez choisir une image plus petite (< 5MB).');
+        } else if (response.status === 422) {
+          alert(`Données invalides : ${errorDetail}`);
         } else {
-          alert(`Erreur serveur: ${errorData.detail || response.status}`);
+          alert(`Erreur: ${errorDetail}`);
         }
       }
     } catch (error: any) {
       console.error("❌ Erreur upload:", error);
-      // Message utilisateur-friendly pour erreurs réseau
+      
+      // Messages d'erreur utilisateur-friendly
       if (error.message?.includes('Failed to fetch') || error.message?.includes('Network')) {
         alert('Impossible de contacter le serveur. Vérifie ta connexion internet.');
+      } else if (error.message?.includes('Session') || error.message?.includes('Token')) {
+        alert(error.message);
       } else {
-        alert("Impossible de contacter le serveur Kemtchop.");
+        alert("Une erreur inattendue est survenue. Veuillez réessayer.");
       }
     } finally {
       setLoading(false);
@@ -183,7 +241,7 @@ export default function AddProduct() {
   return (
     <div className="max-w-5xl mx-auto bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden">
       <div className="bg-black p-6 flex justify-between items-center">
-        <h2 className="text-xl font-bold text-white">Nouveau Menu : Configurer Kemtchop</h2>
+        <h2 className="text-xl font-bold text-white">Nouveau Menu : Configurer KemTchop</h2>
         <span className="bg-red-600 text-white text-[10px] px-3 py-1 rounded-full font-black uppercase italic">Admin Panel v2.1</span>
       </div>
 
